@@ -214,3 +214,19 @@ Work Log:
 Stage Summary:
 - GET /v1/models حالا عمومی است (لیست مدل‌ها حساس نیست) و Model Discovery کلاینت‌ها بدون کلید پاس می‌شود؛ اندپوینت‌های چت همچنان محافظت‌شده‌اند
 - برای اعمال روی آدرس دپلوی‌شده، کاربر باید دوباره publish/deploy کند؛ راه‌حل موقت روی بیلد قدیمی: واردکردن کلید در کلاینت + افزودن دستی ۷ مدل (skip discovery)
+
+---
+Task ID: 11
+Agent: main (Z.ai Code)
+Task: بررسی گزارش کاربر — «با مدل‌های gpt می‌گوید من Claude Sonnet 5 هستم ساختهٔ Anthropic»
+
+Work Log:
+- ساخت scripts/probe_identity.py: درخواست مستقیم به آپستریم freemodels (با همان هدرهای جعلی) با modelId مختلف و سؤال هویت — بدون واسطهٔ کد ما
+- نتایج پروب: gpt-5.6-terra → «I am Claude Sonnet 5, created by Anthropic» (خود آپستریم!) · glm-5.2 → «I am GLM 5.2 by Z.AI» ✓ · kimi-k3 → «I am Kimi K3, created by Moonshot AI» ✓ · gpt-5.6-sol و claude-sonnet-5 در لحظهٔ تست 429 (providers exhausted)
+- نتیجه: مشکل سمت freemodels است — برچسب‌های gpt-5.6-* آن‌ها به مدل Claude وصله؛ کد ما modelId را عیناً می‌فرستد و glm/kimi هویت درست می‌گویند پس modelId رعایت می‌شود
+- خطای 429 آپستریم زیرساخت واقعی‌شان را فاش کرد: «Nvidia 1 keys + DashScope 3 keys x 64 models»
+- مستندسازی: ردیف ۵ به Known Issues در README.md (ریشه + download/) اضافه شد
+
+Stage Summary:
+- تشخیص قطعی: جعل برچسب مدل در آپستریم freemodels — نه باگ پروژه؛ راه‌حل واقعی فقط تعویض آپستریم است
+- ابزار reusable scripts/probe_identity.py برای پروب آیندهٔ هویت/سلامت مدل‌های آپستریم باقی ماند
