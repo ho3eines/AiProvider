@@ -123,6 +123,14 @@ npm run smoke             # ۳۰ آزمون رفتاری (خودش سرور را
 npm run smoke -- --base http://127.0.0.1:3000   # آزمون روی سرورِ در حال اجرا
 ```
 
+> **توجه — این مسیر اختیاری است و جای سرویس واقعی را نمی‌گیرد.** پروایدر
+> `mock` در `providers.json` به‌صورت پیش‌فرض `"enabled": false` است، پس اجرای
+> عادی (`npm run dev` یا `node app.js`) همیشه با **مدل‌های واقعی و آپستریم
+> واقعیِ freemodels** کار می‌کند. `dev:mock` فقط یک رجیستری موقت در
+> `.tmp/providers.mock.json` می‌سازد و با `FM_PROVIDERS_FILE` به سرور می‌دهد تا
+> در محیط‌های بدون دسترسی خروجی (CI، سندباکس، قطعی موقت آپستریم) هم بتوان
+> رفتار کد را آزمود.
+
 ### 4.4 Environment Variables | متغیرهای محیطی
 
 <!-- GENERATED:env -->
@@ -683,6 +691,12 @@ npm run verify:full # همهٔ بالا با هم
    استفاده نمی‌کند (`DATABASE_URL` در `.env` کهنه است).
 5. **`package-lock.json` در `.gitignore` است** — قفلِ رسمی ریپو `bun.lock`
    است؛ اگر با npm نصب کردید، lockfile تولیدشده commit نمی‌شود.
+6. **در محیط بدون دسترسی خروجی** (مثل سندباکس/CI که TLS خروجی مسدود است)
+   آپستریم واقعی پاسخ نمی‌دهد و `/api/ping` خطای
+   `Client network socket disconnected before secure TLS connection was
+   established` برمی‌گرداند. این محدودیت محیط است، نه باگ پروژه — روی ماشین
+   خودتان یا هر سرور با اینترنت، همان پیکربندی کار می‌کند. برای آزمون در آن
+   محیط‌ها: `npm run dev:mock` (اختیاری و جدا از اجرای واقعی).
 
 ### 14.2 Roadmap
 
