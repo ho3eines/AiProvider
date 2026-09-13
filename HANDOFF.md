@@ -74,7 +74,7 @@ GET  /api/keys             → {openai, anthropic}  (فقط Next؛ app.js با w
 - [ ] `GET /` → 200 (Next یا app.js)
 - [ ] `OPTIONS /api/chat` → 204 با `Access-Control-Allow-Origin: *`
 - [ ] `GET /api/ping` → `{"status":"ok",...}` (تاخیر ۲–۳ ثانیه طبیعی است؛ خطای سهمیهٔ آپستریم هم endpoint را سالم نگه می‌دارد)
-- [ ] `GET /v1/models` با کلید → ۷ مدل؛ بدون کلید → 401
+- [ ] `GET /v1/models` بدون کلید → ۲۰۰ با ۷ مدل (عمومی)؛ `POST /v1/chat/completions` بدون کلید → 401
 - [ ] `POST /v1/chat/completions` استریم → چانک‌ها + `[DONE]`؛ غیراستریم → `usage`
 - [ ] `POST /v1/messages` بدون `max_tokens` → 400؛ با آن → چرخهٔ کامل رویدادها
 - [ ] مسیر ناشناس → 404؛ بدنهٔ >5MB → 413 (app.js)

@@ -198,3 +198,19 @@ Stage Summary:
 - تحویل‌دادنی‌ها: AI-GUIDE.md (ریشه پروژه + download/) · download/docs/SmartChat-AIGUIDE.html (منبع) · SmartChat-AIGUIDE.pdf (۱۰ صفحه، ~281KB، برداری، Vazirmatn embed، شماره صفحه + متادیتا)
 - سند چهارم مجموعهٔ مستندات پروژه شد (README / HANDOFF / AI-GUIDE / worklog)؛ کلیدهای واقعی API طبق الگوی اسناد قبلی درج شد
 - known-issue ثابت: هشدارهای bidi استخراج متن RTL در pdf_qa غیرمسدودکننده‌اند (تأیید بصری)
+
+---
+Task ID: 10
+Agent: main (Z.ai Code)
+Task: رفع خطای 401 در Model Discovery کلاینت‌ها روی GET /v1/models (گزارش کاربر: «وقتی به Anthropic میدی این خطا رو میده»)
+
+Work Log:
+- علت ریشه‌ای: کلاینت‌ها هنگام Model Discovery (تست اتصال) معمولاً بدون کلید به /v1/models درخواست می‌فرستند؛ اندپوینت قبلاً کلید اجباری داشت → 401 و شکست کشف مدل
+- بررسی هدرهای پاسخ URL دپلوی‌شدهٔ کاربر (z1gsv701bt21-d.space-z.ai — X-Fc-Request-Id): بیلد production مستقر، هنوز کد قدیمی را اجرا می‌کند → برای اعمال فیکس باید دوباره deploy/publish شود
+- فیکس در هر دو نسخه هم‌زمان: src/app/v1/models/route.ts (حذف کامل گیت 401 و imports بلااستفاده — GET بدون پارامتر) و app.js (handleModels بدون keyIsValid + کامنت «عمومی، بدون کلید» + به‌روزرسانی کامنت هدر فایل)
+- صحت‌سنجی: node --check app.js ✓ · localhost:3000/v1/models بدون کلید → 200 با هر ۷ مدل ✓ · /v1/chat/completions و /v1/messages بدون کلید → همچنان 401 ✓ · تست E2E سبک Anthropic با x-api-key و نام نمایشی «Claude Fable 5.1» → پاسخ واقعی «تست موفق» با فرمت message استاندارد ✓
+- همگام‌سازی مستندات: README.md (جدول احراز هویت 7.1 + نقشهٔ فایل + نمونهٔ curl بخش 7.4)، HANDOFF.md (چک‌لیست)، AI-GUIDE.md (بخش 5.2 + تست curl شمارهٔ ۳) — ریشه + کپی download/
+
+Stage Summary:
+- GET /v1/models حالا عمومی است (لیست مدل‌ها حساس نیست) و Model Discovery کلاینت‌ها بدون کلید پاس می‌شود؛ اندپوینت‌های چت همچنان محافظت‌شده‌اند
+- برای اعمال روی آدرس دپلوی‌شده، کاربر باید دوباره publish/deploy کند؛ راه‌حل موقت روی بیلد قدیمی: واردکردن کلید در کلاینت + افزودن دستی ۷ مدل (skip discovery)

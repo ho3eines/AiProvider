@@ -9,7 +9,7 @@
  *    GET  /                    → صفحهٔ HTML چت (فارسی، RTL، تم تاریک)
  *    POST /api/chat            → پروکسی استریم به آپستریم (SSE زنده، pipe مستقیم)
  *    GET  /api/ping            → تست اتصال به آپستریم → {status, ms, sample}
- *    GET  /v1/models           → لیست مدل‌ها (فرمت OpenAI — با کلید)
+ *    GET  /v1/models           → لیست مدل‌ها (فرمت OpenAI — عمومی، بدون کلید)
  *    POST /v1/chat/completions → اندپوینت سازگار OpenAI (استریم + غیراستریم)
  *    POST /v1/messages         → اندپوینت سازگار Anthropic (استریم + غیراستریم)
  *    OPTIONS *                 → 204 با هدرهای CORS باز
@@ -2533,14 +2533,9 @@ function collectUpstreamText(full) {
   return acc;
 }
 
-/* ---------- GET /v1/models — لیست مدل‌ها (فرمت OpenAI) ---------- */
+/* ---------- GET /v1/models — لیست مدل‌ها (فرمت OpenAI — عمومی، بدون کلید) ---------- */
+/* کلاینت‌ها هنگام Model Discovery معمولاً کلید نمی‌فرستند؛ این اندپوینت عمداً باز است */
 function handleModels(req, res) {
-  const key = getBearerToken(req) || (req.headers['x-api-key'] || '').trim();
-  if (!keyIsValid(key)) {
-    logReq('yellow', 'GET /v1/models → 401 (کلید نامعتبر)');
-    openaiError(res, 401, 'کلید API نامعتبر است. کلید را از بنر اجرا یا بخش ⚙️ تنظیمات بگیرید.', 'invalid_api_key');
-    return;
-  }
   sendJson(res, 200, {
     object: 'list',
     data: FM_MODELS.map((m) => ({
@@ -2550,7 +2545,7 @@ function handleModels(req, res) {
       owned_by: 'freemodels-' + m.vendor.toLowerCase().replace(/\s+/g, '-'),
     })),
   });
-  logReq('green', 'GET /v1/models → 200');
+  logReq('green', 'GET /v1/models → 200 (عمومی)');
 }
 
 /* ---------- POST /v1/chat/completions — سازگار OpenAI ---------- */

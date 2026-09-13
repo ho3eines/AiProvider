@@ -124,7 +124,7 @@ node --check app.js    # بررسی صحت سینتکس (قبل از هر است
 | `src/app/api/chat/route.ts` | پروکسی استریم چت (بدون احراز هویت — اپ داخلی) |
 | `src/app/api/ping/route.ts` | تست اتصال سبک آپستریم → `{status, ms, sample}` |
 | `src/app/api/keys/route.ts` | کلیدها برای مودال ⚙️ تنظیمات |
-| `src/app/v1/models/route.ts` | `GET /v1/models` فرمت OpenAI (نیاز به کلید) |
+| `src/app/v1/models/route.ts` | `GET /v1/models` فرمت OpenAI (عمومی — بدون کلید) |
 | `src/app/v1/chat/completions/route.ts` | `POST /v1/chat/completions` سازگار OpenAI (استریم/غیراستریم) |
 | `src/app/v1/messages/route.ts` | `POST /v1/messages` سازگار Anthropic (model/max_tokens اجباری) |
 | `app.js` | نسخهٔ تک‌فایل (3082 خط / ~120KB): `PAGE_CSS` + `PAGE_JS` + `PAGE_HTML` (UI) + هندلرهای همان ۶ مسیر + بنر رنگی — بدون هیچ پکیج |
@@ -174,7 +174,8 @@ node --check app.js    # بررسی صحت سینتکس (قبل از هر است
 
 | Endpoint | Header |
 |---|---|
-| `/v1/models` · `/v1/chat/completions` | `Authorization: Bearer <key>` |
+| `/v1/models` | **بدون کلید (عمومی)** — برای Model Discovery کلاینت‌ها که معمولاً کلید نمی‌فرستند |
+| `/v1/chat/completions` | `Authorization: Bearer <key>` |
 | `/v1/messages` | `x-api-key: <key>` (یا همان Bearer) + `anthropic-version` اختیاری |
 | `/api/chat` · `/api/ping` | بدون احراز هویت (اپ داخلی) |
 
@@ -199,9 +200,10 @@ node --check app.js    # بررسی صحت سینتکس (قبل از هر است
 
 ### 7.4 `GET /v1/models` — List Models (OpenAI format)
 
+عمومی است و کلید نمی‌خواهد — کلاینت‌ها هنگام کشف خودکار مدل (Model Discovery) معمولاً کلید نمی‌فرستند:
+
 ```bash
-curl -s http://localhost:3000/v1/models \
-  -H "Authorization: Bearer sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50"
+curl -s http://localhost:3000/v1/models
 ```
 
 ```json

@@ -1,9 +1,11 @@
 /**
- * GET /v1/models — لیست مدل‌ها به فرمت OpenAI (نیاز به کلید)
+ * GET /v1/models — لیست مدل‌ها به فرمت OpenAI (عمومی — بدون کلید)
+ * برخی کلاینت‌ها هنگام Model Discovery (تست اتصال) کلید نمی‌فرستند؛
+ * بنابراین این اندپوینت عمداً باز است — لیست مدل‌ها اطلاعات حساسی ندارد.
+ * اندپوینت‌های چت (/v1/chat/completions و /v1/messages) همچنان کلید می‌خواهند.
  */
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { FM_MODELS } from '@/lib/models';
-import { bearerFrom, getApiKeys, keyIsValid } from '@/lib/apikeys';
 import { V1_CORS } from '@/lib/v1';
 
 export const runtime = 'nodejs';
@@ -15,22 +17,7 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: V1_CORS });
 }
 
-export async function GET(req: NextRequest) {
-  const keys = getApiKeys();
-  const key = bearerFrom(req.headers.get('authorization')) || (req.headers.get('x-api-key') || '').trim();
-  if (!keyIsValid(key, keys)) {
-    return NextResponse.json(
-      {
-        error: {
-          message: 'کلید API نامعتبر است. کلید را از بنر اجرا یا بخش ⚙️ تنظیمات بگیرید.',
-          type: 'invalid_request_error',
-          param: null,
-          code: 'invalid_api_key',
-        },
-      },
-      { status: 401, headers: V1_CORS },
-    );
-  }
+export async function GET() {
   return NextResponse.json(
     {
       object: 'list',

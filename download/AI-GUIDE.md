@@ -117,11 +117,10 @@ Authorization: Bearer <key>
 
 ### 5.2 GET /v1/models
 
-لیست استاندارد OpenAI با ۷ مدل و `owned_by=freemodels-anthropic|openai|z.ai|moonshot-ai`. بدون کلید ← 401. نمونه:
+لیست استاندارد OpenAI با ۷ مدل و `owned_by=freemodels-anthropic|openai|z.ai|moonshot-ai`. **عمومی و بدون کلید** — چون کلاینت‌ها هنگام Model Discovery معمولاً کلید نمی‌فرستند (اندپوینت‌های چت همچنان کلید می‌خواهند). نمونه:
 
 ```bash
-curl -s http://localhost:3000/v1/models \
-  -H "Authorization: Bearer sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50"
+curl -s http://localhost:3000/v1/models
 ```
 
 ### 5.3 POST /v1/chat/completions
@@ -273,8 +272,9 @@ GET /api/keys → {openai, anthropic}   (فقط Next؛ app.js با window.__FM__
 ```bash
 K="sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50"; A="sk-ant-api03-9lamB2K7KoYT8fw8tAp2CKL5kKsOHKhN4mE9eawuzRuW0aU3umJirsEFbS3B6RCjLRw8lrJ0YRmsnxECIu3nHaKM"; B=http://localhost:3000
 curl -s $B/api/ping                                                # ۱ سلامت آپستریم
-curl -s $B/v1/models -H "Authorization: Bearer $K" | head -c 400   # ۲ لیست ۷ مدل
-curl -s $B/v1/models | head -c 200                                 # ۳ 401 بدون کلید
+curl -s $B/v1/models | head -c 400                                 # ۲ لیست ۷ مدل (عمومی — بدون کلید)
+curl -s $B/v1/chat/completions -H "Content-Type: application/json" \
+  -d '{"model":"kimi-k3","messages":[]}' | head -c 200             # ۳ 401 بدون کلید
 curl -sN $B/v1/chat/completions -H "Authorization: Bearer $K" -H "Content-Type: application/json" \
   -d '{"model":"kimi-k3","messages":[{"role":"user","content":"سلام"}],"stream":true}'   # ۴ استریم + [DONE]
 curl -s $B/v1/chat/completions -H "Authorization: Bearer $K" -H "Content-Type: application/json" \
