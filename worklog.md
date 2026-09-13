@@ -113,3 +113,23 @@ Stage Summary:
   2) نسخه تک‌فایل مستقل: /home/z/my-project/app.js — با `node app.js` (پورت 3000) یا `PORT=xxxx node app.js` اجرا می‌شود، بدون هیچ پکیجی
 - معیارهای پذیرش: هر ۷ مورد تأیید (اجرای بدون نصب، رندر کامل، استریم زنده 286 تکه، توقف واقعی با destroy آپستریم، ماندگاری پس از رفرش، خروجی MD/JSON، کد تمیز با کامنت فارسی)
 - محدودیت خارجی شناخته‌شده: آپستریم رایگان گاه‌به‌گاه 429 «providers exhausted» می‌دهد؛ هر دو نسخه آن را به حباب خطای قرمز شفاف تبدیل می‌کنند و پس از چند ثانیه retry موفق بوده است
+
+---
+Task ID: 6
+Agent: main (Z.ai Code)
+Task: افزودن ۷ مدل جدید سایت freemodels + اندپوینت‌های سازگار OpenAI و Anthropic با کلید API (در هر دو نسخه app.js و Next.js)
+
+Work Log:
+- لیست مدل‌ها طبق اسکرین‌شات کاربر به‌روزرسانی شد (۵ مدل قدیمی → ۷ مدل جدید): claude-sonnet-5 · claude-fable-5 · claude-fable-5.1 (پیش‌فرض) · gpt-5.6-sol · gpt-5.6-terra · glm-5.2 · kimi-k3 — در app.js (datalist با برچسب نام—سازنده + ثابت FM_MODELS سمت سرور + کلاینت) و page.tsx (MODELS آبجکتی + label در option)
+- کلیدهای API طبق قوانین OpenAI/Anthropic: تابع loadOrCreateKeys — اولین اجرا می‌سازد و در api-keys.json (کنار app.js / ریشه پروژه، permission 600) ذخیره می‌کند؛ کلید سبک OpenAI = «sk-» + ۴۸ کاراکتر، کلید سبک Anthropic = «sk-ant-api03-» + ۸۸ کاراکتر؛ override با env (OPENAI_API_KEY / ANTHROPIC_API_KEY)؛ هر دو کلید روی هر دو اندپوینت پذیرفته می‌شوند؛ نسخه Next.js همان فایل را می‌خواند (src/lib/apikeys.ts با کش در حافظه) → کلیدها بین هر دو نسخه یکسان‌اند
+- app.js — سه اندپوینت جدید: GET /v1/models (فرمت لیست OpenAI) · POST /v1/chat/completions (Authorization: Bearer — استریم SSE با reasoning_content + چانک نقش + finish_reason + stream_options.include_usage + data:[DONE]، و غیراستریم با usage تخمینی) · POST /v1/messages (x-api-key + anthropic-version — اعتبارسنجی اجباری model/max_tokens مثل خود Anthropic با خطای «max_tokens: Field required»، system به‌صورت رشته/بلوک، استریم با چرخهٔ کامل message_start→ping→content_block_start/delta/stop→message_delta→message_stop و بلوک thinking با thinking_delta، غیراستریم با بلوک‌های text/thinking)
+- app.js — زیرساخت: پارسر SSE سمت سرور (makeUpstreamParser هم‌منطق با کلاینت) + collectUpstreamText برای پاسخ کامل + flattenContent برای محتوای بلوکی + getBearerToken + openaiError/anthropicError (خطا در همان فرمت API مقصد) + قطع کلاینت → destroy آپستریم در استریم‌ها + نرمال‌سازی نرم نام مدل در /api/chat هم (resolveModelId: «Claude Fable 5.1» و «claude_fable 5.1» هم قبول است) + بنر اجرا با کلیدها و اندپوینت‌ها
+- app.js — UI: مودال ⚙️ تنظیمات بخش جدید «🔑 اندپوینت‌های API و کلیدها» (نمایش هر دو کلید + دکمه کپی + لیست اندپوینت‌ها + نمونه curl واقعی با کلید)؛ کلیدها از سرور با window.__FM__ تزریق می‌شوند؛ CSS با کلاس‌های api-sec/key-row/api-eps/api-curl (رفع باگ: div#api-eps کلاس نداشت و خط‌به‌خط رندر نمی‌شد)
+- Next.js — فایل‌های جدید: src/lib/models.ts (FM_MODELS + resolveModelId) · src/lib/apikeys.ts (getApiKeys/keyIsValid/bearerFrom) · src/lib/v1.ts (CORS/SSE headers + flattenContent + readAll + estTokens) · src/app/v1/models/route.ts · src/app/v1/chat/completions/route.ts (ReadableStream استریم + abort با req.signal → destroy آپستریم) · src/app/v1/messages/route.ts · src/app/api/keys/route.ts (کلیدها برای مودال) — page.tsx: بخش API در مودال با fetch /api/keys + دکمه کپی + توست
+- تست curl (پورت 3109 برای app.js و 3000 برای Next): /v1/models → 200/401 صحیح · OpenAI استریم → چانک‌های واقعی شامل reasoning_content و [DONE] · OpenAI غیراستریم → پاسخ واقعی «سلام» از glm-5.2/kimi-k3 با usage · Anthropic استریم → چرخهٔ کامل رویدادها (خطای موقت آپستریم داخل text_delta منتشر شد) · Anthropic بدون max_tokens → 400 طبق قوانین · خطای 429 آپستریم در فرمت استاندارد هر API برگشت · /api/ping سالم
+- تأیید مرورگری (agent-browser): رندر هر دو UI بدون خطای کنسول · datalist ۷ مدل · مودال API در هر دو نسخه با کلیدهای درست · ارسال پیام زنده در هر دو (Next: پاسخ کامل پایتون با هایلایت + آمار 121 تکه؛ app.js: «سلام» با 💭 تفکر و آمار 44 تکه) · lint: 0 خطا
+
+Stage Summary:
+- هر دو نسخه حالا علاوه بر چت، یک API کامل سازگار با OpenAI و Anthropic هم سرویس می‌دهند؛ کلیدها: sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50 (OpenAI) و sk-ant-api03-9lamB2K7KoYT8fw8tAp2CKL5kKsOHKhN4mE9eawuzRuW0aU3umJirsEFbS3B6RCjLRw8lrJ0YRmsnxECIu3nHaKM (Anthropic) — در api-keys.json مشترک هر دو نسخه
+- app.js: 2901 خط / 120,243 بایت — node --check سالم (فایل اصلی + PAGE_JS استخراج‌شده)
+- محدودیت شناخته‌شده: آپستریم رایگان گاهی 429 «providers exhausted» می‌دهد؛ در استریم داخل خود پاسخ و در غیراستریم با کد وضعیت درست به فرمت API مقصد برگردانده می‌شود و چند ثانیه بعد retry موفق است

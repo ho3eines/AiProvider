@@ -1,0 +1,1102 @@
+     1→#!/usr/bin/env node
+     2→/**
+     3→ * ─────────────────────────────────────────────────────────────────────────────
+     4→ *  چت هوشمند — نسخهٔ تک‌فایل Node.js خالص (بدون هیچ وابستگی خارجی)
+     5→ * ─────────────────────────────────────────────────────────────────────────────
+     6→ *  اجرا:  node app.js          (پورت پیش‌فرض 3000 — با متغیر محیطی PORT قابل تغییر)
+     7→ *
+     8→ *  روت‌ها:
+     9→ *    GET  /           → صفحهٔ HTML چت (فارسی، RTL، تم تاریک)
+    10→ *    POST /api/chat   → پروکسی استریم به آپستریم (SSE زنده، pipe مستقیم)
+    11→ *    GET  /api/ping   → تست اتصال به آپستریم → {status, ms, sample}
+    12→ *    OPTIONS *        → 204 با هدرهای CORS باز
+    13→ *    بقیه             → 404
+    14→ *
+    15→ *  منطق پروکسی/مارک‌داون/پارسر SSE پورتِ دقیقِ نسخهٔ Next.js است:
+    16→ *    src/lib/upstream.ts ، src/app/api/chat/route.ts ، src/app/api/ping/route.ts
+    17→ *    src/lib/markdown.ts ، src/lib/sse.ts ، src/app/page.tsx
+    18→ * ─────────────────────────────────────────────────────────────────────────────
+    19→ */
+    20→'use strict';
+    21→
+    22→const http = require('http');
+    23→const https = require('https');
+    24→
+    25→/* ---------- ثابت‌های آپستریم (پورت از src/lib/upstream.ts) ---------- */
+    26→const UPSTREAM_URL = 'https://freemodels-chat.freemodels.workers.dev/';
+    27→const MAX_BODY_BYTES = 5 * 1024 * 1024; // حداکثر حجم بدنهٔ درخواست: ۵ مگابایت
+    28→const UPSTREAM_TIMEOUT_MS = 180 * 1000; // تایم‌اوت آپستریم: ۱۸۰ ثانیه
+    29→
+    30→/** هدرهایی که به‌جای مرورگر به آپستریم فرستاده می‌شود (دور زدن CORS آپستریم) */
+    31→const SPOOFED_HEADERS = {
+    32→  'Content-Type': 'application/json',
+    33→  'Origin': 'https://freemodels.pro',
+    34→  'Referer': 'https://freemodels.pro/',
+    35→  'Accept': '*/*',
+    36→  'Accept-Language': 'en-US,en;q=0.9',
+    37→  'User-Agent':
+    38→    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
+    39→  'sec-ch-ua': '"Chromium";v="152", "Not?A_Brand";v="24"',
+    40→  'sec-ch-ua-mobile': '?0',
+    41→  'sec-ch-ua-platform': '"Windows"',
+    42→  'sec-fetch-dest': 'empty',
+    43→  'sec-fetch-mode': 'cors',
+    44→  'sec-fetch-site': 'cross-site',
+    45→  'Accept-Encoding': 'identity', // پاسخ فشرده نباشد تا pipe مستقیم ممکن باشد
+    46→};
+    47→
+    48→/** هدرهای CORS باز برای پاسخ‌های خود سرور */
+    49→const OPEN_CORS = {
+    50→  'Access-Control-Allow-Origin': '*',
+    51→  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    52→  'Access-Control-Allow-Headers': 'Content-Type',
+    53→  'Access-Control-Max-Age': '86400',
+    54→};
+    55→
+    56→/* ---------- لاگ رنگی ANSI کنسول ---------- */
+    57→const C = {
+    58→  dim: '\x1b[2m',
+    59→  reset: '\x1b[0m',
+    60→  green: '\x1b[32m',
+    61→  red: '\x1b[31m',
+    62→  yellow: '\x1b[33m',
+    63→  cyan: '\x1b[36m',
+    64→};
+    65→
+    66→function logReq(color, msg) {
+    67→  const t = new Date().toLocaleTimeString('en-GB');
+    68→  console.log(C.dim + '[' + t + ']' + C.reset + ' ' + (C[color] || C.cyan) + msg + C.reset);
+    69→}
+    70→
+    71→function safeDestroy(r) {
+    72→  try {
+    73→    if (r) r.destroy();
+    74→  } catch (e) {
+    75→    /* نادیده بگیر */
+    76→  }
+    77→}
+    78→
+    79→/* ═══════════════════════════════════════════════════════════════════════════
+    80→   استایل صفحه (PAGE_CSS) — بدون backtick
+    81→   ═══════════════════════════════════════════════════════════════════════════ */
+    82→const PAGE_CSS = String.raw`
+    83→/* ─── پایه ─── */
+    84→:root{
+    85→  --bg:#0b1220; --panel:#0d1526; --surface:#111a2e; --line:#243352; --line2:#1a2440;
+    86→  --accent:#3b82f6; --accent2:#38bdf8; --txt:#e2e8f0; --muted:#94a3b8; --faint:#64748b;
+    87→}
+    88→*{box-sizing:border-box}
+    89→[hidden]{display:none!important}
+    90→html,body{margin:0;padding:0;height:100%}
+    91→body{background:var(--bg);color:var(--txt);font-family:'Vazirmatn',Vazir,Tahoma,'Segoe UI',system-ui,sans-serif;font-size:15px;-webkit-font-smoothing:antialiased}
+    92→button{font-family:inherit}
+    93→#app{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden}
+    94→
+    95→/* ─── اسکرول‌بار سفارشی ─── */
+    96→*::-webkit-scrollbar{width:8px;height:8px}
+    97→*::-webkit-scrollbar-thumb{background:#243352;border-radius:8px}
+    98→*::-webkit-scrollbar-thumb:hover{background:#3b82f6}
+    99→*::-webkit-scrollbar-track{background:transparent}
+   100→
+   101→/* ─── هدر ─── */
+   102→#topbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 14px;background:rgba(13,21,38,.95);border-bottom:1px solid var(--line);z-index:30}
+   103→.brand{display:none;align-items:center;gap:8px;font-weight:800;font-size:14px;color:#f1f5f9}
+   104→.brand-ic{display:flex;width:32px;height:32px;align-items:center;justify-content:center;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent2));font-size:15px}
+   105→#model-inp{height:36px;width:180px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--txt);padding:0 12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;text-align:left;direction:ltr}
+   106→#model-inp:focus{outline:none;border-color:var(--accent)}
+   107→.opts{display:none;align-items:center;gap:14px;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:6px 12px}
+   108→.opts label{display:flex;align-items:center;gap:6px;font-size:12px;color:#cbd5e1;cursor:pointer;user-select:none;white-space:nowrap}
+   109→.opts input{accent-color:var(--accent);width:14px;height:14px;cursor:pointer}
+   110→.spacer{flex:1}
+   111→.hbtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:transparent;color:#cbd5e1;font-size:12px;cursor:pointer;transition:border-color .15s,background .15s}
+   112→.hbtn:hover{border-color:var(--accent);background:var(--line2)}
+   113→.hbtn.on{border-color:var(--accent);background:#14203c;color:var(--accent2)}
+   114→.icon-btn{display:inline-flex;width:36px;height:36px;align-items:center;justify-content:center;border-radius:10px;border:1px solid var(--line);background:transparent;color:#cbd5e1;font-size:14px;cursor:pointer;transition:border-color .15s,background .15s}
+   115→.icon-btn:hover{border-color:var(--accent);background:var(--line2)}
+   116→.status{display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:8px 10px}
+   117→.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+   118→.dot-ok{background:#34d399;box-shadow:0 0 8px rgba(52,211,153,.8)}
+   119→.dot-check{background:#fbbf24;animation:fm-pulse 1.2s ease-in-out infinite}
+   120→.dot-fail{background:#ef4444}
+   121→@keyframes fm-pulse{50%{opacity:.35}}
+   122→.status-t{font-size:12px;color:var(--muted);white-space:nowrap}
+   123→
+   124→/* ─── بدنه ─── */
+   125→#body-main{display:flex;flex:1;min-height:0}
+   126→#overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(2px);z-index:40}
+   127→
+   128→/* ─── سایدبار راست ─── */
+   129→#sidebar{position:fixed;top:0;bottom:0;right:0;z-index:50;width:260px;display:flex;flex-direction:column;background:var(--panel);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .2s ease}
+   130→#sidebar.open{transform:translateX(0)}
+   131→@media(min-width:769px){#sidebar{position:static;transform:none}}
+   132→.sb-head{display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid var(--line);font-weight:800;font-size:14px;color:#f1f5f9}
+   133→.sb-title{display:flex;align-items:center;gap:8px}
+   134→.sb-new{padding:12px}
+   135→.btn-primary{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;border:none;border-radius:12px;background:var(--accent);color:#fff;font-weight:700;font-size:14px;padding:10px 0;cursor:pointer;transition:background .15s}
+   136→.btn-primary:hover{background:#2563eb}
+   137→.btn-primary:disabled{opacity:.4;cursor:not-allowed}
+   138→#chat-list{flex:1;min-height:0;overflow-y:auto;padding:0 12px 12px;display:flex;flex-direction:column;gap:6px}
+   139→.chat-item{display:flex;align-items:center;gap:8px;border:1px solid transparent;border-radius:12px;padding:10px 12px;font-size:13px;color:var(--muted);cursor:pointer;transition:background .15s}
+   140→.chat-item:hover{background:var(--surface);color:#cbd5e1}
+   141→.chat-item.active{border-color:rgba(59,130,246,.6);background:#14203c;color:#f1f5f9}
+   142→.chat-ic{flex:none;font-size:13px}
+   143→.chat-ic.dim{opacity:.5}
+   144→.chat-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+   145→.chat-del{flex:none;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border:none;border-radius:7px;background:transparent;color:var(--faint);cursor:pointer;opacity:0;transition:opacity .15s}
+   146→.chat-item:hover .chat-del{opacity:1}
+   147→.chat-del:hover{background:rgba(239,68,68,.15);color:#fca5a5}
+   148→.sb-foot{border-top:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:8px}
+   149→.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+   150→.sb-foot .hbtn{height:34px}
+   151→.btn-danger{width:100%;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid rgba(239,68,68,.3);border-radius:10px;background:transparent;color:#fca5a5;font-size:12px;padding:8px 0;cursor:pointer;transition:background .15s}
+   152→.btn-danger:hover{background:rgba(239,68,68,.1)}
+   153→
+   154→/* ─── ناحیهٔ چت ─── */
+   155→#main{display:flex;flex:1;min-width:0;min-height:0;flex-direction:column}
+   156→#chat-area{flex:1;min-height:0;overflow-y:auto;padding:16px 14px}
+   157→#chat-inner{max-width:768px;margin:0 auto;display:flex;flex-direction:column;gap:20px;min-height:100%}
+   158→
+   159→/* ─── پیام‌ها ─── */
+   160→.msg-col{display:flex;flex-direction:column;gap:6px}
+   161→.from-user{align-items:flex-end}
+   162→.from-assistant{align-items:flex-start}
+   163→.msg-role{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--faint);padding:0 4px}
+   164→.avatar{width:16px;height:16px;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:inline-flex;align-items:center;justify-content:center;font-size:9px}
+   165→.bubble{border-radius:16px;padding:12px 16px;font-size:15px;line-height:2;max-width:88%;overflow-wrap:anywhere;word-break:break-word}
+   166→.bub-user{background:#233457;color:#f1f5f9;border-bottom-left-radius:6px}
+   167→.user-text{white-space:pre-wrap}
+   168→.bub-asst{width:100%;max-width:720px;background:var(--surface);border:1px solid var(--line);color:#e2e8f0;border-bottom-right-radius:6px}
+   169→.bub-err{width:100%;max-width:720px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.4);color:#fecaca;font-size:14px;line-height:1.8;border-bottom-right-radius:6px}
+   170→.msg-actions{display:flex;align-items:center;gap:6px;padding:0 4px;flex-wrap:wrap}
+   171→.act-btns{display:flex;align-items:center;gap:6px;opacity:1;transition:opacity .15s}
+   172→@media(min-width:769px){.act-btns{opacity:0}.msg-col:hover .act-btns{opacity:1}}
+   173→.act-btn{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--muted);font-size:12px;cursor:pointer;transition:border-color .15s,color .15s}
+   174→.act-btn:hover{border-color:var(--accent);color:#f1f5f9}
+   175→.act-btn.danger:hover{border-color:#ef4444;color:#fca5a5}
+   176→.msg-stats{font-size:11px;color:var(--faint)}
+   177→.msg-err{margin-top:8px;border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.1);border-radius:10px;padding:8px 12px;font-size:13px;line-height:1.8;color:#fecaca}
+   178→.badge-stop{margin-top:6px;display:inline-flex;align-items:center;gap:4px;background:rgba(245,158,11,.15);color:#fcd34d;font-size:11px;border-radius:7px;padding:2px 8px;width:max-content}
+   179→
+   180→/* ─── باکس تفکر مدل ─── */
+   181→.think-box{border:1px solid var(--line);background:#0d1730;border-radius:12px;margin-bottom:10px;overflow:hidden;font-size:13px}
+   182→.think-box summary{cursor:pointer;padding:8px 12px;color:#93c5fd;font-weight:600;font-size:12px;user-select:none;list-style:none}
+   183→.think-box summary::-webkit-details-marker{display:none}
+   184→.think-box summary::before{content:'\25B8  ';color:var(--accent2)}
+   185→.think-box[open] summary::before{content:'\25BE  '}
+   186→.think-body{max-height:240px;overflow-y:auto;padding:4px 12px 12px;font-size:12px;line-height:1.9;color:var(--muted);white-space:pre-wrap;word-break:break-word}
+   187→
+   188→/* ─── مارک‌داون ─── */
+   189→.md-body{overflow-wrap:anywhere}
+   190→.md-p{margin:0 0 8px}
+   191→.md-p:last-child{margin-bottom:0}
+   192→.md-h{margin:14px 0 8px;font-weight:800;line-height:1.6;color:#f1f5f9}
+   193→.md-body h1.md-h{font-size:1.45em}
+   194→.md-body h2.md-h{font-size:1.3em}
+   195→.md-body h3.md-h{font-size:1.15em}
+   196→.md-body h4.md-h,.md-body h5.md-h,.md-body h6.md-h{font-size:1em}
+   197→.md-list{margin:4px 0 10px;padding-right:22px}
+   198→.md-list li{margin:2px 0}
+   199→.md-quote{margin:6px 0 10px;border-right:3px solid var(--accent);background:#0d1730;border-radius:8px;padding:8px 12px;color:#cbd5e1}
+   200→.md-hr{border:none;border-top:1px solid var(--line);margin:14px 0}
+   201→.md-link{color:var(--accent2);text-decoration:underline}
+   202→.md-icode{direction:ltr;unicode-bidi:embed;font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:#0d1730;border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:#7dd3fc}
+   203→.md-code{direction:ltr;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:10px 0;background:#0a1120}
+   204→.md-code-head{display:flex;align-items:center;justify-content:space-between;background:#101b31;padding:6px 12px;border-bottom:1px solid var(--line)}
+   205→.md-code-lang{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--muted);direction:ltr}
+   206→.md-code-copy{border:1px solid var(--line);background:transparent;color:#cbd5e1;font-size:11px;border-radius:7px;padding:3px 10px;cursor:pointer;transition:border-color .15s,color .15s}
+   207→.md-code-copy:hover{border-color:var(--accent);color:#fff}
+   208→.md-pre{margin:0;padding:12px 14px;overflow-x:auto;font-family:ui-monospace,Consolas,monospace;font-size:13px;line-height:1.7;tab-size:4}
+   209→.md-pre code{font-family:inherit}
+   210→.tok-keyword{color:#38bdf8}
+   211→.tok-string{color:#86efac}
+   212→.tok-number{color:#facc15}
+   213→.tok-comment{color:#64748b;font-style:italic}
+   214→
+   215→/* ─── کرسر چشمک‌زن استریم ─── */
+   216→.stream-cursor{display:inline-block;width:9px;height:1.05em;border-radius:2px;background:var(--accent2);vertical-align:text-bottom;margin-inline-start:2px;animation:fm-blink 1s steps(1) infinite}
+   217→@keyframes fm-blink{50%{opacity:0}}
+   218→
+   219→/* ─── صفحهٔ خوش‌آمد ─── */
+   220→.welcome{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;text-align:center;padding:40px 0}
+   221→.w-ic{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:30px;box-shadow:0 10px 30px rgba(59,130,246,.25)}
+   222→.w-head h2{margin:0 0 8px;font-size:24px;font-weight:800;color:#f1f5f9}
+   223→.w-head p{margin:0;font-size:13px;color:var(--muted)}
+   224→.w-grid{display:grid;grid-template-columns:1fr;gap:12px;width:100%;max-width:576px}
+   225→@media(min-width:640px){.w-grid{grid-template-columns:1fr 1fr}}
+   226→.w-card{display:flex;align-items:flex-start;gap:12px;text-align:right;border:1px solid var(--line);background:var(--surface);border-radius:16px;padding:16px;cursor:pointer;transition:border-color .15s,background .15s}
+   227→.w-card:hover{border-color:var(--accent);background:#14203c}
+   228→.w-card-ic{flex:none;width:36px;height:36px;border-radius:12px;background:#0d1730;display:flex;align-items:center;justify-content:center;font-size:16px;transition:background .15s}
+   229→.w-card:hover .w-card-ic{background:var(--accent)}
+   230→.w-card-title{display:block;font-size:13px;font-weight:700;color:#e2e8f0}
+   231→.w-card-text{display:block;margin-top:4px;font-size:11.5px;line-height:1.8;color:var(--muted)}
+   232→
+   233→/* ─── کامپوزر پایین (چسبان با flex) ─── */
+   234→#composer{flex:none;border-top:1px solid var(--line);background:var(--panel);padding:12px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+   235→.comp-row{max-width:768px;margin:0 auto;display:flex;align-items:flex-end;gap:8px}
+   236→#ta{flex:1;resize:none;border:1px solid var(--line);background:var(--surface);border-radius:16px;padding:11px 16px;color:#f1f5f9;font-size:15px;line-height:1.8;font-family:inherit;min-height:46px;max-height:200px}
+   237→#ta:focus{outline:none;border-color:var(--accent)}
+   238→#ta::placeholder{color:var(--faint)}
+   239→#btn-send{flex:none;width:52px;height:46px;border:none;border-radius:16px;background:var(--accent);color:#fff;font-size:17px;cursor:pointer;transition:background .15s}
+   240→#btn-send:hover{background:#2563eb}
+   241→#btn-stop{flex:none;height:46px;padding:0 16px;border:none;border-radius:16px;background:rgba(239,68,68,.9);color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:background .15s}
+   242→#btn-stop:hover{background:#ef4444}
+   243→.comp-note{max-width:768px;margin:8px auto 0;text-align:center;font-size:11px;color:var(--faint)}
+   244→
+   245→/* ─── ویرایش اینلاین ─── */
+   246→.edit-wrap{display:flex;flex-direction:column;gap:8px;width:100%}
+   247→.edit-ta{width:100%;resize:none;border:1px solid var(--accent);background:#0d1730;border-radius:12px;padding:8px 12px;color:#f1f5f9;font-size:13px;line-height:1.9;font-family:inherit}
+   248→.edit-ta:focus{outline:none}
+   249→.edit-row{display:flex;gap:8px}
+   250→.btn-mini{display:inline-flex;align-items:center;gap:6px;border-radius:10px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;transition:background .15s}
+   251→.btn-save{border:none;background:var(--accent);color:#fff}
+   252→.btn-save:hover{background:#2563eb}
+   253→.btn-cancel{border:1px solid var(--line);background:transparent;color:#cbd5e1}
+   254→.btn-cancel:hover{background:var(--line2)}
+   255→
+   256→/* ─── پنل Raw SSE (شناور پایین-چپ) ─── */
+   257→#raw-panel{position:fixed;bottom:16px;left:16px;z-index:50;display:flex;flex-direction:column;width:min(92vw,460px);max-height:300px;border:1px solid var(--line);background:#0d1526;border-radius:12px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+   258→.raw-head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px;font-weight:700;color:#cbd5e1}
+   259→.raw-title{flex:1}
+   260→.raw-size{font-size:10px;color:var(--faint)}
+   261→.raw-mini{width:24px;height:24px;display:flex;align-items:center;justify-content:center;border:none;border-radius:7px;background:transparent;color:var(--muted);cursor:pointer;font-size:12px}
+   262→.raw-mini:hover{background:var(--line2);color:#e2e8f0}
+   263→#raw-pre{flex:1;margin:0;overflow:auto;padding:12px;text-align:left;font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.6;color:#cbd5e1;direction:ltr}
+   264→
+   265→/* ─── مودال تنظیمات ─── */
+   266→#modal{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:16px}
+   267→#modal-ov{position:absolute;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(3px)}
+   268→#modal-box{position:relative;width:100%;max-width:512px;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 25px 60px rgba(0,0,0,.5)}
+   269→.m-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+   270→.m-head h3{margin:0;font-size:15px;font-weight:800;color:#f1f5f9}
+   271→.m-label{display:block;font-size:13px;font-weight:700;color:#cbd5e1;margin-bottom:8px}
+   272→#sys-prompt{width:100%;resize:none;border:1px solid var(--line);background:#0d1730;border-radius:12px;padding:10px 12px;color:#f1f5f9;font-size:13px;line-height:1.9;font-family:inherit}
+   273→#sys-prompt:focus{outline:none;border-color:var(--accent)}
+   274→.m-hint{font-size:11px;line-height:1.9;color:var(--faint);margin:8px 0 0}
+   275→.m-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+   276→.m-foot .btn-primary{width:auto;padding:8px 18px;border-radius:10px;font-size:13px}
+   277→.m-foot .hbtn{height:36px}
+   278→
+   279→/* ─── توست‌ها ─── */
+   280→#toasts{pointer-events:none;position:fixed;left:0;right:0;bottom:96px;z-index:70;display:flex;flex-direction:column;align-items:center;gap:8px;padding:0 16px}
+   281→.toast{pointer-events:auto;border-radius:12px;padding:8px 16px;font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.4);backdrop-filter:blur(6px)}
+   282→.toast-ok{border:1px solid rgba(16,185,129,.4);background:rgba(15,32,24,.95);color:#a7f3d0}
+   283→.toast-err{border:1px solid rgba(239,68,68,.5);background:rgba(42,18,32,.95);color:#fecaca}
+   284→
+   285→/* ─── ریسپانسیو ─── */
+   286→.only-mobile{display:inline-flex}
+   287→@media(min-width:769px){.only-mobile{display:none}}
+   288→@media(min-width:1024px){.brand{display:flex}}
+   289→@media(max-width:640px){
+   290→  .opts{display:none}
+   291→  .status-t{display:none}
+   292→  #model-inp{width:130px}
+   293→  #chat-area{padding:12px 10px}
+   294→  .bubble{max-width:92%}
+   295→}
+   296→`;
+   297→
+   298→/* ═══════════════════════════════════════════════════════════════════════════
+   299→   اسکریپت سمت کلاینت (PAGE_JS)
+   300→   قواعد سخت: در این بخش هیچ backtick و هیچ ${ مجاز نیست؛
+   301→   backtick های مارک‌داون با \x60 ساخته شده‌اند.
+   302→   ═══════════════════════════════════════════════════════════════════════════ */
+   303→const PAGE_JS = String.raw`
+   304→(function () {
+   305→'use strict';
+   306→
+   307→/* ================= ثابت‌ها ================= */
+   308→var MODELS = ['claude-fable-5.1', 'claude-sonnet-4.5', 'gpt-4o', 'gemini-2.0-flash', 'deepseek-chat'];
+   309→var DEFAULT_SETTINGS = { modelId: 'claude-fable-5.1', thinking: false, deepSearch: false, stream: true, systemPrompt: '' };
+   310→var MAX_RAW_LOG = 80 * 1024; // پنل Raw SSE: نگه‌داری آخرین ~80KB
+   311→
+   312→var SUGGESTIONS = [
+   313→  { icon: '🧠', title: 'توضیح مفهومی', text: 'به زبان ساده توضیح بده مدل‌های زبانی بزرگ (LLM) چطور کار می‌کنند؟' },
+   314→  { icon: '💻', title: 'کد بنویس', text: 'یک اسکریپت پایتون بنویس که پرتکرارترین کلمات یک متن را پیدا کند.' },
+   315→  { icon: '✉️', title: 'ایمیل رسمی', text: 'یک ایمیل رسمی و محترمانه به مدیرم بنویس و درخواست یک روز مرخصی کن.' },
+   316→  { icon: '🌍', title: 'ترجمه', text: 'این جمله را به انگلیسی روان ترجمه کن: زندگی زیباست و باید از هر لحظه لذت برد.' }
+   317→];
+   318→
+   319→/* ================= وضعیت کلی ================= */
+   320→var chats = [];
+   321→var activeId = '';
+   322→var settings = Object.assign({}, DEFAULT_SETTINGS);
+   323→var streaming = false;
+   324→var liveMsgId = null;
+   325→var status = 'checking'; // ok | checking | fail
+   326→var rawOpen = false;
+   327→var settingsOpen = false;
+   328→var editingId = null;
+   329→var editingText = '';
+   330→var rawLog = '';
+   331→var aborter = null;
+   332→var streamState = null;
+   333→var rafId = 0;
+   334→var rawRafId = 0;
+   335→var nearBottom = true;
+   336→var saveTimer = 0;
+   337→
+   338→/* ================= ابزارهای DOM ================= */
+   339→function $(id) { return document.getElementById(id); }
+   340→function el(tag, cls, text) {
+   341→  var e = document.createElement(tag);
+   342→  if (cls) e.className = cls;
+   343→  if (text != null) e.textContent = text;
+   344→  return e;
+   345→}
+   346→function uid() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
+   347→function findChatById(id) {
+   348→  for (var i = 0; i < chats.length; i++) if (chats[i].id === id) return chats[i];
+   349→  return null;
+   350→}
+   351→function getChat() { return findChatById(activeId) || chats[0] || null; }
+   352→function freshChat() {
+   353→  return { id: uid(), title: 'گفتگوی جدید', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+   354→}
+   355→function fmtTime(ts) {
+   356→  var d = new Date(ts);
+   357→  return d.toLocaleDateString('fa-IR') + ' ' + d.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+   358→}
+   359→
+   360→/* ================= localStorage ================= */
+   361→function loadChats() {
+   362→  try {
+   363→    var raw = localStorage.getItem('fm_chats');
+   364→    if (raw) {
+   365→      var arr = JSON.parse(raw);
+   366→      if (Array.isArray(arr) && arr.length) return arr;
+   367→    }
+   368→  } catch (e) { /* داده خراب — نادیده بگیر */ }
+   369→  return [];
+   370→}
+   371→function loadSettings() {
+   372→  try {
+   373→    var raw = localStorage.getItem('fm_settings');
+   374→    if (raw) return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(raw));
+   375→  } catch (e) { /* نادیده بگیر */ }
+   376→  return Object.assign({}, DEFAULT_SETTINGS);
+   377→}
+   378→function saveChats() {
+   379→  clearTimeout(saveTimer);
+   380→  saveTimer = setTimeout(function () {
+   381→    try { localStorage.setItem('fm_chats', JSON.stringify(chats)); } catch (e) { /* حافظه پر */ }
+   382→  }, 250);
+   383→}
+   384→function saveSettingsNow() {
+   385→  try { localStorage.setItem('fm_settings', JSON.stringify(settings)); } catch (e) { /* نادیده بگیر */ }
+   386→}
+   387→
+   388→/* ================= کپی و دانلود ================= */
+   389→async function copyText(t) {
+   390→  try {
+   391→    await navigator.clipboard.writeText(t);
+   392→    return true;
+   393→  } catch (e) {
+   394→    try {
+   395→      var ta = document.createElement('textarea');
+   396→      ta.value = t;
+   397→      ta.style.position = 'fixed';
+   398→      ta.style.opacity = '0';
+   399→      document.body.appendChild(ta);
+   400→      ta.select();
+   401→      var ok = document.execCommand('copy');
+   402→      ta.remove();
+   403→      return ok;
+   404→    } catch (e2) { return false; }
+   405→  }
+   406→}
+   407→function downloadFile(name, content, mime) {
+   408→  try {
+   409→    var blob = new Blob([content], { type: mime + ';charset=utf-8' });
+   410→    var url = URL.createObjectURL(blob);
+   411→    var a = document.createElement('a');
+   412→    a.href = url;
+   413→    a.download = name;
+   414→    document.body.appendChild(a);
+   415→    a.click();
+   416→    a.remove();
+   417→    setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+   418→  } catch (e) { toast('دانلود ناموفق بود', 'err'); }
+   419→}
+   420→
+   421→/* ═══════════ مارک‌داون امن (پورت دقیق از src/lib/markdown.ts) ═══════════ */
+   422→
+   423→/* ---------- ذخیره کد بلوک‌ها برای دکمه «کپی» ---------- */
+   424→var codeStore = new Map();
+   425→var codeCounter = 0;
+   426→var MAX_STORE = 80;
+   427→function registerCode(code) {
+   428→  codeCounter++;
+   429→  var id = 'cb' + codeCounter;
+   430→  codeStore.set(id, code);
+   431→  if (codeStore.size > MAX_STORE) {
+   432→    var first = codeStore.keys().next();
+   433→    if (!first.done) codeStore.delete(first.value);
+   434→  }
+   435→  return id;
+   436→}
+   437→function getCodeById(id) {
+   438→  return codeStore.has(id) ? codeStore.get(id) : null;
+   439→}
+   440→
+   441→/* ---------- escape امن HTML ---------- */
+   442→function escapeHtml(s) {
+   443→  return s
+   444→    .replace(/&/g, '&amp;')
+   445→    .replace(/</g, '&lt;')
+   446→    .replace(/>/g, '&gt;')
+   447→    .replace(/"/g, '&quot;')
+   448→    .replace(/'/g, '&#39;');
+   449→}
+   450→
+   451→/* ---------- هایلایت سینتکس ساده: کلیدواژه/رشته/عدد/کامنت ---------- */
+   452→var KEYWORDS = [
+   453→  'const', 'let', 'var', 'function', 'return', 'if', 'else', 'elif', 'for', 'while', 'do', 'switch',
+   454→  'case', 'break', 'continue', 'default', 'class', 'extends', 'new', 'this', 'self', 'super',
+   455→  'import', 'export', 'from', 'as', 'async', 'await', 'yield', 'try', 'catch', 'finally', 'throw',
+   456→  'raise', 'except', 'typeof', 'instanceof', 'delete', 'in', 'of', 'not', 'and', 'or', 'is', 'with',
+   457→  'def', 'pass', 'lambda', 'print', 'True', 'False', 'None', 'true', 'false', 'null', 'undefined',
+   458→  'void', 'int', 'float', 'str', 'bool', 'public', 'private', 'static', 'struct', 'enum',
+   459→  'interface', 'type', 'func', 'fn', 'impl', 'match', 'use', 'mut', 'pub', 'end', 'then'
+   460→];
+   461→
+   462→var HASH_COMMENT_LANGS = /^(py|python|rb|ruby|sh|bash|zsh|shell|yml|yaml|toml|ini|conf|config|makefile|dockerfile|r|pl|perl)$/i;
+   463→
+   464→function highlightCode(code, lang) {
+   465→  var hashComment = HASH_COMMENT_LANGS.test(lang.trim());
+   466→  var commentPart = hashComment
+   467→    ? '(#[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*)'
+   468→    : '(\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*)';
+   469→  var re = new RegExp(
+   470→    commentPart +
+   471→      "|('(?:\\\\.|[^'\\\\\\n])*'|\"(?:\\\\.|[^\"\\\\\\n])*\"|\x60(?:\\\\.|[^\x60\\\\])*\x60)" +
+   472→      '|\\b(\\d+(?:\\.\\d+)?)\\b' +
+   473→      '|\\b(' + KEYWORDS.join('|') + ')\\b',
+   474→    'g'
+   475→  );
+   476→  var out = '';
+   477→  var last = 0;
+   478→  var m;
+   479→  while ((m = re.exec(code)) !== null) {
+   480→    out += escapeHtml(code.slice(last, m.index));
+   481→    if (m[1]) out += '<span class="tok-comment">' + escapeHtml(m[1]) + '</span>';
+   482→    else if (m[2]) out += '<span class="tok-string">' + escapeHtml(m[2]) + '</span>';
+   483→    else if (m[3]) out += '<span class="tok-number">' + escapeHtml(m[3]) + '</span>';
+   484→    else out += '<span class="tok-keyword">' + escapeHtml(m[4]) + '</span>';
+   485→    last = m.index + m[0].length;
+   486→  }
+   487→  out += escapeHtml(code.slice(last));
+   488→  return out;
+   489→}
+   490→
+   491→/* ---------- ساخت HTML بلوک کد با هدر زبان + دکمه کپی ---------- */
+   492→function codeBlockHtml(lang, code) {
+   493→  var id = registerCode(code);
+   494→  var shownLang = escapeHtml(lang || 'code');
+   495→  return (
+   496→    '<div class="md-code" dir="ltr">' +
+   497→    '<div class="md-code-head"><span class="md-code-lang">' + shownLang + '</span>' +
+   498→    '<button type="button" class="md-code-copy" data-code-id="' + id + '">کپی</button>' +
+   499→    '</div>' +
+   500→    '<pre class="md-pre"><code>' + highlightCode(code, lang) + '</code></pre>' +
+   501→    '</div>'
+   502→  );
+   503→}
+   504→
+   505→/* ---------- پردازش inline: لینک/بولد/ایتالیک/خط‌خورده ---------- */
+   506→function inlineFormat(s) {
+   507→  var out = s;
+   508→  // لینک [متن](https://…) — فقط http/https برای امنیت
+   509→  out = out.replace(
+   510→    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+   511→    '<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link">$1</a>'
+   512→  );
+   513→  // بولد **…**
+   514→  out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+   515→  // ایتالیک *…*
+   516→  out = out.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+   517→  // خط‌خورده ~~…~~
+   518→  out = out.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+   519→  return out;
+   520→}
+   521→
+   522→/**
+   523→ * تبدیل مارک‌داون به HTML امن
+   524→ * مراحل: استخراج بلوک کد → escape → کد اینلاین → پردازش بلاکی → بازگردانی placeholder ها
+   525→ */
+   526→function renderMarkdown(src) {
+   527→  if (!src) return '';
+   528→
+   529→  /* ۱) استخراج بلوک‌های کد (حتی اگر در حین استریم هنوز بسته نشده باشند) */
+   530→  var codeBlocks = [];
+   531→  var text = src.replace(/\x60{3}([^\n\x60]*)\n?([\s\S]*?)(?:\x60{3}|$)/g, function (all, langLine, code) {
+   532→    codeBlocks.push({ lang: (langLine || '').trim().split(/\s+/)[0] || '', code: code });
+   533→    return '\u0000CB' + (codeBlocks.length - 1) + '\u0000';
+   534→  });
+   535→
+   536→  /* ۲) escape کل متن — قبل از هر درج تگ */
+   537→  text = escapeHtml(text);
+   538→
+   539→  /* ۳) کد اینلاین … → placeholder */
+   540→  var inlineCodes = [];
+   541→  text = text.replace(/\x60([^\x60\n]+)\x60/g, function (all, c) {
+   542→    inlineCodes.push(c);
+   543→    return '\u0000IC' + (inlineCodes.length - 1) + '\u0000';
+   544→  });
+   545→
+   546→  /* ۴) پردازش بلاکی خط‌به‌خط */
+   547→  var lines = text.split('\n');
+   548→  var html = [];
+   549→  var para = [];
+   550→  var list = null; // {type:'ul'|'ol', items:[]}
+   551→
+   552→  function flushParagraph() {
+   553→    if (!para.length) return;
+   554→    html.push('<p class="md-p">' + para.map(inlineFormat).join('<br/>') + '</p>');
+   555→    para = [];
+   556→  }
+   557→  function closeList() {
+   558→    if (!list) return;
+   559→    html.push(
+   560→      '<' + list.type + ' class="md-list">' +
+   561→      list.items.map(function (it) { return '<li>' + inlineFormat(it) + '</li>'; }).join('') +
+   562→      '</' + list.type + '>'
+   563→    );
+   564→    list = null;
+   565→  }
+   566→
+   567→  var i = 0;
+   568→  while (i < lines.length) {
+   569→    var trimmed = lines[i].trim();
+   570→
+   571→    // placeholder بلوک کد در خط مستقل
+   572→    var cb = trimmed.match(/^\u0000CB(\d+)\u0000$/);
+   573→    if (cb) {
+   574→      flushParagraph();
+   575→      closeList();
+   576→      var b = codeBlocks[Number(cb[1])];
+   577→      html.push(b ? codeBlockHtml(b.lang, b.code) : '');
+   578→      i++;
+   579→      continue;
+   580→    }
+   581→
+   582→    // خط خالی
+   583→    if (!trimmed) {
+   584→      flushParagraph();
+   585→      closeList();
+   586→      i++;
+   587→      continue;
+   588→    }
+   589→
+   590→    // هدینگ # … ######
+   591→    var h = trimmed.match(/^(#{1,6})\s+(.+)$/);
+   592→    if (h) {
+   593→      flushParagraph();
+   594→      closeList();
+   595→      var lv = h[1].length;
+   596→      html.push('<h' + lv + ' class="md-h">' + inlineFormat(h[2]) + '</h' + lv + '>');
+   597→      i++;
+   598→      continue;
+   599→    }
+   600→
+   601→    // خط افقی --- *** ___
+   602→    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+   603→      flushParagraph();
+   604→      closeList();
+   605→      html.push('<hr class="md-hr"/>');
+   606→      i++;
+   607→      continue;
+   608→    }
+   609→
+   610→    // نقل‌قول > (در متن escape شده به صورت &gt;)
+   611→    if (/^(&gt;|>)\s?/.test(trimmed)) {
+   612→      flushParagraph();
+   613→      closeList();
+   614→      var quote = [];
+   615→      while (i < lines.length) {
+   616→        var m2 = lines[i].trim().match(/^(&gt;|>)\s?(.*)$/);
+   617→        if (!m2) break;
+   618→        quote.push(m2[2]);
+   619→        i++;
+   620→      }
+   621→      html.push('<blockquote class="md-quote">' + quote.map(inlineFormat).join('<br/>') + '</blockquote>');
+   622→      continue;
+   623→    }
+   624→
+   625→    // لیست نامرتب - * +
+   626→    var ul = trimmed.match(/^[-*+]\s+(.+)$/);
+   627→    if (ul) {
+   628→      flushParagraph();
+   629→      if (!list || list.type !== 'ul') {
+   630→        closeList();
+   631→        list = { type: 'ul', items: [] };
+   632→      }
+   633→      list.items.push(ul[1]);
+   634→      i++;
+   635→      continue;
+   636→    }
+   637→
+   638→    // لیست مرتب 1. 2)
+   639→    var ol = trimmed.match(/^(\d{1,3})[.)]\s+(.+)$/);
+   640→    if (ol) {
+   641→      flushParagraph();
+   642→      if (!list || list.type !== 'ol') {
+   643→        closeList();
+   644→        list = { type: 'ol', items: [] };
+   645→      }
+   646→      list.items.push(ol[2]);
+   647→      i++;
+   648→      continue;
+   649→    }
+   650→
+   651→    // پاراگراف
+   652→    para.push(trimmed);
+   653→    i++;
+   654→  }
+   655→  flushParagraph();
+   656→  closeList();
+   657→
+   658→  /* ۵) بازگردانی placeholder ها */
+   659→  var out = html.join('\n');
+   660→  out = out.replace(/\u0000CB(\d+)\u0000/g, function (a, n) {
+   661→    var bb = codeBlocks[Number(n)];
+   662→    return bb ? codeBlockHtml(bb.lang, bb.code) : '';
+   663→  });
+   664→  out = out.replace(/\u0000IC(\d+)\u0000/g, function (a, n) {
+   665→    return '<code class="md-icode">' + inlineCodes[Number(n)] + '</code>';
+   666→  });
+   667→  return out;
+   668→}
+   669→
+   670→/** افزودن کرسر چشمک‌زن به انتهای HTML در حال استریم */
+   671→function appendCursor(html) {
+   672→  var cursor = '<span class="stream-cursor" aria-hidden="true"></span>';
+   673→  if (!html) return cursor;
+   674→  var idx = html.lastIndexOf('</p>');
+   675→  if (idx !== -1) return html.slice(0, idx) + cursor + html.slice(idx);
+   676→  return html + cursor;
+   677→}
+   678→
+   679→/* ═══════════ پارسر جهانی SSE (پورت دقیق از src/lib/sse.ts) ═══════════
+   680→   پشتیبانی از همهٔ فرمت‌ها:
+   681→   - data: {"choices":[{"delta":{"content":"..."}}]}  (سبک OpenAI)
+   682→   - data: {"content":"..."} یا {"text":"..."}         (فیلد مستقیم)
+   683→   - {"content":"..."} بدون پیشوند data:               (آبجکت خام)
+   684→   - رشتهٔ خام غیر JSON                                 (مستقیم به متن)
+   685→   - data: [DONE]                                       (پایان استریم)
+   686→   فیلدهای تفکر: reasoning_content / reasoning / thinking / delta.thinking
+   687→*/
+   688→function createSseParser(opts) {
+   689→  var buf = '';         // بافر خطوط ناقص
+   690→  var pendingJson = ''; // JSON چندخطیِ ناقص
+   691→
+   692→  function emit(text, reasoning, error) {
+   693→    text = text || '';
+   694→    reasoning = reasoning || '';
+   695→    if (text || reasoning || error) opts.onEvent({ text: text, reasoning: reasoning, error: error });
+   696→  }
+   697→
+   698→  function addText(v, out) {
+   699→    if (typeof v === 'string') out.text += v;
+   700→    else if (Array.isArray(v)) {
+   701→      for (var i = 0; i < v.length; i++) {
+   702→        var b = v[i];
+   703→        if (typeof b === 'string') out.text += b;
+   704→        else if (b && typeof b === 'object' && typeof b.text === 'string') out.text += b.text;
+   705→      }
+   706→    }
+   707→  }
+   708→  function addReason(v, out) {
+   709→    if (typeof v === 'string') out.reasoning += v;
+   710→  }
+   711→
+   712→  function applyObject(obj) {
+   713→    var out = { text: '', reasoning: '' };
+   714→    var error;
+   715→    var o = obj;
+   716→    if (!o || typeof o !== 'object') {
+   717→      emit(String(obj));
+   718→      return;
+   719→    }
+   720→
+   721→    // --- سبک OpenAI: choices[0].delta / choices[0].message ---
+   722→    var choice = Array.isArray(o.choices) ? o.choices[0] : undefined;
+   723→    if (choice && typeof choice === 'object') {
+   724→      var delta = choice.delta;
+   725→      var message = choice.message;
+   726→      if (delta && typeof delta === 'object') {
+   727→        addText(delta.content, out);
+   728→        addText(delta.text, out);
+   729→        addReason(delta.reasoning_content, out);
+   730→        addReason(delta.reasoning, out);
+   731→        addReason(delta.thinking, out);
+   732→      }
+   733→      if (message && typeof message === 'object') {
+   734→        addText(message.content, out);
+   735→        addText(message.text, out);
+   736→        addReason(message.reasoning_content, out);
+   737→        addReason(message.reasoning, out);
+   738→        addReason(message.thinking, out);
+   739→      }
+   740→      if (typeof choice.text === 'string') addText(choice.text, out);
+   741→    }
+   742→
+   743→    // --- سبک Claude: delta.text / delta.thinking ---
+   744→    var topDelta = o.delta;
+   745→    if (topDelta && typeof topDelta === 'object') {
+   746→      addText(topDelta.text, out);
+   747→      addText(topDelta.content, out);
+   748→      addReason(topDelta.thinking, out);
+   749→      addReason(topDelta.reasoning_content, out);
+   750→      addReason(topDelta.reasoning, out);
+   751→    }
+   752→    var topMessage = o.message;
+   753→    if (topMessage && typeof topMessage === 'object') {
+   754→      addText(topMessage.content, out);
+   755→      addReason(topMessage.reasoning_content, out);
+   756→      addReason(topMessage.thinking, out);
+   757→    }
+   758→
+   759→    // --- فیلدهای مستقیم روی ریشه ---
+   760→    addText(o.content, out);
+   761→    addText(o.text, out);
+   762→    addReason(o.reasoning_content, out);
+   763→    addReason(o.reasoning, out);
+   764→    addReason(o.thinking, out);
+   765→
+   766→    // --- خطای داخل استریم ---
+   767→    if (o.error) {
+   768→      error = typeof o.error === 'string'
+   769→        ? o.error
+   770→        : (o.error && typeof o.error.message === 'string')
+   771→          ? o.error.message
+   772→          : JSON.stringify(o.error);
+   773→    }
+   774→
+   775→    emit(out.text, out.reasoning, error);
+   776→  }
+   777→
+   778→  function flushPending() {
+   779→    if (!pendingJson) return;
+   780→    emit(pendingJson); // JSON ناتمام → به‌صورت خام
+   781→    pendingJson = '';
+   782→  }
+   783→
+   784→  function handlePayload(payload) {
+   785→    var t = payload.trim();
+   786→    if (!t) return;
+   787→    if (t === '[DONE]') return; // پایان استریم
+   788→    if (t.charAt(0) === '{' || t.charAt(0) === '[') {
+   789→      // JSON ممکن است چندخطی باشد؛ تا کامل شدن نگه می‌داریم
+   790→      pendingJson = pendingJson ? pendingJson + '\n' + payload : payload;
+   791→      try {
+   792→        applyObject(JSON.parse(pendingJson));
+   793→        pendingJson = '';
+   794→      } catch (e) { /* هنوز ناقص است؛ خط بعدی ادامه می‌دهد */ }
+   795→    } else {
+   796→      // رشتهٔ خام غیر JSON → مستقیم به متن
+   797→      flushPending();
+   798→      emit(payload);
+   799→    }
+   800→  }
+   801→
+   802→  function processLine(line) {
+   803→    if (line === '') { flushPending(); return; }
+   804→    if (line.charAt(0) === ':') return; // کامنت SSE مثل ": ping"
+   805→    if (line.indexOf('data:') === 0) {
+   806→      var p = line.slice(5);
+   807→      if (p.charAt(0) === ' ') p = p.slice(1);
+   808→      handlePayload(p);
+   809→      return;
+   810→    }
+   811→    if (/^(event|id|retry)\s*:/i.test(line)) return; // متادیتای SSE
+   812→    handlePayload(line); // خط خام (مثلاً {"content":"..."} بدون data:)
+   813→  }
+   814→
+   815→  return {
+   816→    feed: function (chunk) {
+   817→      buf += chunk;
+   818→      var nl;
+   819→      while ((nl = buf.indexOf('\n')) !== -1) {
+   820→        var line = buf.slice(0, nl).replace(/\r$/, '');
+   821→        buf = buf.slice(nl + 1);
+   822→        processLine(line);
+   823→      }
+   824→    },
+   825→    end: function () {
+   826→      if (buf.trim()) {
+   827→        processLine(buf.replace(/\r$/, ''));
+   828→        buf = '';
+   829→      }
+   830→      if (pendingJson) {
+   831→        emit(pendingJson);
+   832→        pendingJson = '';
+   833→      }
+   834→    }
+   835→  };
+   836→}
+   837→
+   838→/* ================= توست ================= */
+   839→function toast(text, kind) {
+   840→  try {
+   841→    var box = $('toasts');
+   842→    var t = el('div', 'toast ' + (kind === 'err' ? 'toast-err' : 'toast-ok'), text);
+   843→    box.appendChild(t);
+   844→    while (box.children.length > 4) box.removeChild(box.firstChild);
+   845→    setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 2800);
+   846→  } catch (e) { /* نادیده بگیر */ }
+   847→}
+   848→
+   849→/* ═══════════ رندر UI ═══════════ */
+   850→
+   851→function renderStatus() {
+   852→  var dot = $('status-dot');
+   853→  var txt = $('status-text');
+   854→  dot.className = 'dot ' + (status === 'ok' ? 'dot-ok' : status === 'checking' ? 'dot-check' : 'dot-fail');
+   855→  txt.textContent = status === 'ok' ? 'متصل' : status === 'checking' ? 'در حال بررسی…' : 'بدون اتصال';
+   856→  $('status-box').title = txt.textContent;
+   857→}
+   858→
+   859→function renderComposer() {
+   860→  $('btn-send').hidden = streaming;
+   861→  $('btn-stop').hidden = !streaming;
+   862→  $('btn-new').disabled = streaming;
+   863→}
+   864→
+   865→function renderSidebar() {
+   866→  var listEl = $('chat-list');
+   867→  listEl.innerHTML = '';
+   868→  var cur = getChat();
+   869→  for (var i = 0; i < chats.length; i++) {
+   870→    (function (c) {
+   871→      var isActive = !!(cur && c.id === cur.id);
+   872→      var item = el('div', 'chat-item' + (isActive ? ' active' : ''));
+   873→      item.setAttribute('role', 'button');
+   874→      item.tabIndex = 0;
+   875→      var ic = el('span', 'chat-ic' + (isActive ? '' : ' dim'), '💬');
+   876→      var t = el('span', 'chat-title', c.title);
+   877→      t.title = c.title;
+   878→      var del = el('button', 'chat-del', '✕');
+   879→      del.type = 'button';
+   880→      del.setAttribute('aria-label', 'حذف گفتگوی ' + c.title);
+   881→      del.title = 'حذف';
+   882→      del.addEventListener('click', function (e) {
+   883→        e.stopPropagation();
+   884→        deleteChat(c.id);
+   885→      });
+   886→      item.appendChild(ic);
+   887→      item.appendChild(t);
+   888→      item.appendChild(del);
+   889→      item.addEventListener('click', function () { switchChat(c.id); });
+   890→      item.addEventListener('keydown', function (e) { if (e.key === 'Enter') switchChat(c.id); });
+   891→      listEl.appendChild(item);
+   892→    })(chats[i]);
+   893→  }
+   894→}
+   895→
+   896→/* ---------- ساخت المان یک پیام ---------- */
+   897→function messageEl(m, isLastAssistant, liveFlag) {
+   898→  var isUser = m.role === 'user';
+   899→  var col = el('div', 'msg-col ' + (isUser ? 'from-user' : 'from-assistant'));
+   900→  if (liveFlag) col.id = 'msg-live';
+   901→
+   902→  // برچسب نقش
+   903→  var role = el('div', 'msg-role');
+   904→  if (isUser) {
+   905→    role.appendChild(el('span', null, '👤 شما'));
+   906→  } else {
+   907→    role.appendChild(el('span', 'avatar', '🤖'));
+   908→    role.appendChild(el('span', null, 'دستیار'));
+   909→  }
+   910→  col.appendChild(role);
+   911→
+   912→  // حباب پیام
+   913→  var bub = el('div', 'bubble ' + (isUser ? 'bub-user' : (m.isError && !m.content ? 'bub-err' : 'bub-asst')));
+   914→  bub.dir = 'auto';
+   915→
+   916→  // باکس تفکر مدل (بالای پاسخ)
+   917→  if (!isUser && m.reasoning) {
+   918→    var th = el('details', 'think-box');
+   919→    var sum = el('summary', null, '💭 فرایند تفکر مدل');
+   920→    th.appendChild(sum);
+   921→    var tb = el('div', 'think-body', m.reasoning);
+   922→    tb.dir = 'auto';
+   923→    th.appendChild(tb);
+   924→    if (liveFlag) {
+   925→      // حین استریم: حین تفکر باز، بعد از شروع پاسخ بسته (و بعدش انتخاب کاربر محترم است)
+   926→      if (!m.content) th.open = true;
+   927→      else if (!streamState.thinkSwitched) { th.open = false; streamState.thinkSwitched = true; }
+   928→      else {
+   929→        var oldNode = document.getElementById('msg-live');
+   930→        var oldThink = oldNode ? oldNode.querySelector('details.think-box') : null;
+   931→        th.open = oldThink ? oldThink.open : false;
+   932→      }
+   933→    } else {
+   934→      th.open = false;
+   935→    }
+   936→    bub.appendChild(th);
+   937→  }
+   938→
+   939→  // محتوای پیام / ویرایش اینلاین
+   940→  if (editingId === m.id && isUser) {
+   941→    var wrap = el('div', 'edit-wrap');
+   942→    var eta = el('textarea', 'edit-ta');
+   943→    eta.dir = 'auto';
+   944→    eta.value = editingText;
+   945→    eta.rows = Math.min(10, Math.max(2, editingText.split('\n').length + 1));
+   946→    eta.addEventListener('input', function () {
+   947→      editingText = eta.value;
+   948→      eta.rows = Math.min(10, Math.max(2, eta.value.split('\n').length + 1));
+   949→    });
+   950→    wrap.appendChild(eta);
+   951→    var row = el('div', 'edit-row');
+   952→    var save = el('button', 'btn-mini btn-save', '✓ ذخیره و ارسال دوباره');
+   953→    save.type = 'button';
+   954→    save.addEventListener('click', function () { onEditSave(m.id); });
+   955→    var cancel = el('button', 'btn-mini btn-cancel', '✕ انصراف');
+   956→    cancel.type = 'button';
+   957→    cancel.addEventListener('click', onEditCancel);
+   958→    row.appendChild(save);
+   959→    row.appendChild(cancel);
+   960→    wrap.appendChild(row);
+   961→    bub.appendChild(wrap);
+   962→    setTimeout(function () { eta.focus(); }, 0);
+   963→  } else if (isUser) {
+   964→    bub.appendChild(el('span', 'user-text', m.content));
+   965→  } else if (m.content) {
+   966→    var md = el('div', 'md-body');
+   967→    md.innerHTML = liveFlag ? appendCursor(renderMarkdown(m.content)) : renderMarkdown(m.content);
+   968→    bub.appendChild(md);
+   969→  } else if (liveFlag) {
+   970→    bub.appendChild(el('span', 'stream-cursor'));
+   971→  }
+   972→
+   973→  // خطای داخل پیام
+   974→  if (!isUser && m.errorText) bub.appendChild(el('div', 'msg-err', m.errorText));
+   975→  // نشان توقف
+   976→  if (!isUser && m.stopped) bub.appendChild(el('span', 'badge-stop', '⏹ متوقف شد'));
+   977→  col.appendChild(bub);
+   978→
+   979→  // اکشن‌ها + آمار
+   980→  var foot = el('div', 'msg-actions');
+   981→  var acts = el('div', 'act-btns');
+   982→  function mkBtn(label, title, fn, cls) {
+   983→    var b = el('button', 'act-btn' + (cls ? ' ' + cls : ''), label);
+   984→    b.type = 'button';
+   985→    b.title = title;
+   986→    b.setAttribute('aria-label', title);
+   987→    b.addEventListener('click', fn);
+   988→    return b;
+   989→  }
+   990→  acts.appendChild(mkBtn('📋', 'کپی', function () { copyMsg(m); }));
+   991→  if (isUser) acts.appendChild(mkBtn('✏️', 'ویرایش', function () { onEditStart(m); }));
+   992→  if (!isUser && isLastAssistant && !liveFlag && !streaming) {
+   993→    acts.appendChild(mkBtn('↻', 'بازتولید', function () { onRegenerate(m.id); }));
+   994→  }
+   995→  acts.appendChild(mkBtn('🗑', 'حذف', function () { deleteMsg(m.id); }, 'danger'));
+   996→  foot.appendChild(acts);
+   997→
+   998→  if (!isUser && (liveFlag || m.timeSec != null)) {
+   999→    var stats = el('span', 'msg-stats');
+  1000→    if (liveFlag && !m.content) {
+  1001→      stats.textContent = '⏳ در حال دریافت پاسخ…';
+  1002→    } else {
+  1003→      var parts = [];
+  1004→      if (m.timeSec != null) parts.push('⏱ ' + m.timeSec + ' ثانیه');
+  1005→      if (m.chunks != null) parts.push('🧩 ' + m.chunks + ' تکه');
+  1006→      if (m.chars != null) parts.push('✍️ ' + m.chars + ' نویسه');
+  1007→      stats.textContent = parts.join(' · ');
+  1008→    }
+  1009→    foot.appendChild(stats);
+  1010→  }
+  1011→  col.appendChild(foot);
+  1012→  return col;
+  1013→}
+  1014→
+  1015→/* ---------- صفحهٔ خوش‌آمد با ۴ پیشنهاد ---------- */
+  1016→function welcomeEl() {
+  1017→  var w = el('div', 'welcome');
+  1018→  w.appendChild(el('div', 'w-ic', '✨'));
+  1019→  var hw = el('div', 'w-head');
+  1020→  hw.appendChild(el('h2', null, 'چت هوشمند'));
+  1021→  hw.appendChild(el('p', null, 'سوالی داری؟ بپرس — پاسخ را زنده و استریمی می‌گیری.'));
+  1022→  w.appendChild(hw);
+  1023→  var grid = el('div', 'w-grid');
+  1024→  for (var i = 0; i < SUGGESTIONS.length; i++) {
+  1025→    (function (s) {
+  1026→      var b = el('button', 'w-card');
+  1027→      b.type = 'button';
+  1028→      b.appendChild(el('span', 'w-card-ic', s.icon));
+  1029→      var bt = el('span', 'w-card-t');
+  1030→      bt.appendChild(el('span', 'w-card-title', s.title));
+  1031→      bt.appendChild(el('span', 'w-card-text', s.text));
+  1032→      b.appendChild(bt);
+  1033→      b.addEventListener('click', function () { send(s.text); });
+  1034→      grid.appendChild(b);
+  1035→    })(SUGGESTIONS[i]);
+  1036→  }
+  1037→  w.appendChild(grid);
+  1038→  return w;
+  1039→}
+  1040→
+  1041→/* ---------- اسکرول خودکار ---------- */
+  1042→function maybeScroll() {
+  1043→  if (!nearBottom) return;
+  1044→  var c = $('chat-area');
+  1045→  c.scrollTop = c.scrollHeight;
+  1046→}
+  1047→
+  1048→/* ---------- رندر کل ناحیهٔ چت ---------- */
+  1049→function renderChat() {
+  1050→  var area = $('chat-inner');
+  1051→  area.innerHTML = '';
+  1052→  var chat = getChat();
+  1053→  var msgs = chat ? chat.messages : [];
+  1054→  if (!msgs.length && !streaming) {
+  1055→    area.appendChild(welcomeEl());
+  1056→    return;
+  1057→  }
+  1058→  for (var i = 0; i < msgs.length; i++) {
+  1059→    var m = msgs[i];
+  1060→    area.appendChild(messageEl(m, m.role === 'assistant' && i === msgs.length - 1, m.id === liveMsgId));
+  1061→  }
+  1062→  maybeScroll();
+  1063→}
+  1064→
+  1065→/* ---------- به‌روزرسانی زندهٔ پیام در حال استریم (هر فریم حداکثر یک بار) ---------- */
+  1066→function updateLive() {
+  1067→  var chat = getChat();
+  1068→  if (!chat || !streamState) return;
+  1069→  var msgs = chat.messages;
+  1070→  var m = null, idx = -1;
+  1071→  for (var i = 0; i < msgs.length; i++) {
+  1072→    if (msgs[i].id === streamState.msgId) { m = msgs[i]; idx = i; break; }
+  1073→  }
+  1074→  if (!m) return;
+  1075→  m.content = streamState.content;
+  1076→  m.reasoning = streamState.reasoning || null;
+  1077→  var node = messageEl(m, m.role === 'assistant' && idx === msgs.length - 1, true);
+  1078→  var old = document.getElementById('msg-live');
+  1079→  if (old && old.parentNode) old.parentNode.replaceChild(node, old);
+  1080→  else renderChat();
+  1081→  maybeScroll();
+  1082→}
+  1083→function flushNow() { if (streamState) updateLive(); }
+  1084→function scheduleFlush() {
+  1085→  if (rafId) return;
+  1086→  rafId = requestAnimationFrame(function () {
+  1087→    rafId = 0;
+  1088→    flushNow();
+  1089→  });
+  1090→}
+  1091→
+  1092→/* ---------- پنل Raw SSE ---------- */
+  1093→function appendRaw(s) {
+  1094→  rawLog += s;
+  1095→  if (rawLog.length > MAX_RAW_LOG) rawLog = rawLog.slice(-MAX_RAW_LOG);
+  1096→  if (!rawOpen || rawRafId) return;
+  1097→  rawRafId = requestAnimationFrame(function () {
+  1098→    rawRafId = 0;
+  1099→    var p = $('raw-pre');
+  1100→    p.textContent = rawLog;
+
+[showing lines 1-1100 of 2059; use offset=1101 with limit to continue reading]

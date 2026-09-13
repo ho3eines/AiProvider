@@ -6,11 +6,17 @@
  *  اجرا:  node app.js          (پورت پیش‌فرض 3000 — با متغیر محیطی PORT قابل تغییر)
  *
  *  روت‌ها:
- *    GET  /           → صفحهٔ HTML چت (فارسی، RTL، تم تاریک)
- *    POST /api/chat   → پروکسی استریم به آپستریم (SSE زنده، pipe مستقیم)
- *    GET  /api/ping   → تست اتصال به آپستریم → {status, ms, sample}
- *    OPTIONS *        → 204 با هدرهای CORS باز
- *    بقیه             → 404
+ *    GET  /                    → صفحهٔ HTML چت (فارسی، RTL، تم تاریک)
+ *    POST /api/chat            → پروکسی استریم به آپستریم (SSE زنده، pipe مستقیم)
+ *    GET  /api/ping            → تست اتصال به آپستریم → {status, ms, sample}
+ *    GET  /v1/models           → لیست مدل‌ها (فرمت OpenAI — با کلید)
+ *    POST /v1/chat/completions → اندپوینت سازگار OpenAI (استریم + غیراستریم)
+ *    POST /v1/messages         → اندپوینت سازگار Anthropic (استریم + غیراستریم)
+ *    OPTIONS *                 → 204 با هدرهای CORS باز
+ *    بقیه                      → 404
+ *
+ *  کلیدهای API (طبق قوانین OpenAI و Anthropic): اولین اجرا ساخته و در
+ *  api-keys.json کنار همین فایل ذخیره می‌شوند — در بنر اجرا و ⚙️ تنظیمات هم هست.
  *
  *  منطق پروکسی/مارک‌داون/پارسر SSE پورتِ دقیقِ نسخهٔ Next.js است:
  *    src/lib/upstream.ts ، src/app/api/chat/route.ts ، src/app/api/ping/route.ts
@@ -21,6 +27,9 @@
 
 const http = require('http');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
 /* ---------- ثابت‌های آپستریم (پورت از src/lib/upstream.ts) ---------- */
 const UPSTREAM_URL = 'https://freemodels-chat.freemodels.workers.dev/';
@@ -49,9 +58,79 @@ const SPOOFED_HEADERS = {
 const OPEN_CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key, anthropic-version',
   'Access-Control-Max-Age': '86400',
 };
+
+/* ---------- مدل‌های سرویس freemodels (طبق سایت) ---------- */
+const FM_MODELS = [
+  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic',   group: 'Claude Pro' },
+  { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic',   group: 'Claude Pro' },
+  { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic',   group: 'Claude Pro' },
+  { id: 'gpt-5.6-sol',      name: 'GPT 5.6 Sol',      vendor: 'OpenAI',      group: 'ChatGPT Pro' },
+  { id: 'gpt-5.6-terra',    name: 'GPT 5.6 Terra',    vendor: 'OpenAI',      group: 'ChatGPT Pro' },
+  { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI',        group: 'Other Pro Models' },
+  { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI', group: 'Other Pro Models' },
+];
+const DEFAULT_MODEL_ID = 'claude-fable-5.1'; // مدل پیش‌فرض (انتخاب‌شده در سایت)
+const BOOT_AT = Math.floor(Date.now() / 1000); // برای فیلد created در /v1/models
+
+/** تطبیق نرم نام مدل: «Claude Fable 5.1» یا «claude_fable 5.1» هم پذیرفته می‌شود */
+function resolveModelId(input) {
+  if (!input || typeof input !== 'string') return DEFAULT_MODEL_ID;
+  const t = input.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  const hit = FM_MODELS.find((m) => m.id === t || m.name.toLowerCase() === input.trim().toLowerCase());
+  return hit ? hit.id : t || DEFAULT_MODEL_ID;
+}
+
+/* ---------- کلیدهای API (طبق قوانین OpenAI و Anthropic) ----------
+   • کلید سبک OpenAI    : sk-...      → هدر Authorization: Bearer <key>
+   • کلید سبک Anthropic : sk-ant-...  → هدر x-api-key: <key>
+   اولین اجرا: ساخته و در api-keys.json کنار همین فایل ذخیره می‌شود؛
+   اجراهای بعدی همان‌ها لود می‌شوند. با env هم قابل تعیین دستی است:
+   OPENAI_API_KEY / ANTHROPIC_API_KEY */
+const KEY_FILE = path.join(__dirname, 'api-keys.json');
+
+function randomToken(len, alphabet) {
+  const abc = alphabet || 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = crypto.randomBytes(len);
+  let s = '';
+  for (let i = 0; i < len; i++) s += abc[bytes[i] % abc.length];
+  return s;
+}
+
+function loadOrCreateKeys() {
+  const envOpen = (process.env.OPENAI_API_KEY || '').trim();
+  const envAnt = (process.env.ANTHROPIC_API_KEY || '').trim();
+  try {
+    if (fs.existsSync(KEY_FILE)) {
+      const j = JSON.parse(fs.readFileSync(KEY_FILE, 'utf8'));
+      if (j && typeof j.openai === 'string' && typeof j.anthropic === 'string' && j.openai && j.anthropic) {
+        return { openai: envOpen || j.openai, anthropic: envAnt || j.anthropic };
+      }
+    }
+  } catch (e) {
+    /* فایل خراب — دوباره می‌سازیم */
+  }
+  const fresh = {
+    openai: envOpen || ('sk-' + randomToken(48)),
+    anthropic: envAnt || ('sk-ant-api03-' + randomToken(88)),
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    fs.writeFileSync(KEY_FILE, JSON.stringify(fresh, null, 2) + '\n', { mode: 0o600 });
+  } catch (e) {
+    /* فایل‌سیستم اجازه نداد — کلیدها فقط تا پایان اجرا در حافظه می‌مانند */
+  }
+  return { openai: fresh.openai, anthropic: fresh.anthropic };
+}
+
+const API_KEYS = loadOrCreateKeys();
+
+/** اعتبارسنجی کلید — هر دو کلید روی هر دو اندپوینت پذیرفته می‌شوند */
+function keyIsValid(k) {
+  return !!k && (k === API_KEYS.openai || k === API_KEYS.anthropic);
+}
 
 /* ---------- لاگ رنگی ANSI کنسول ---------- */
 const C = {
@@ -275,6 +354,17 @@ button{font-family:inherit}
 .m-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .m-foot .btn-primary{width:auto;padding:8px 18px;border-radius:10px;font-size:13px}
 .m-foot .hbtn{height:36px}
+/* ─── بخش API و کلیدها در مودال تنظیمات ─── */
+.api-sec{border-top:1px dashed var(--line);margin-top:14px;padding-top:12px}
+.api-sec h4{margin:0 0 6px;font-size:13px;font-weight:800;color:var(--accent2)}
+.api-hint{font-size:11px;line-height:1.9;color:var(--faint);margin:0 0 10px}
+.key-row{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 10px;margin-bottom:6px}
+.key-tag{font-size:10.5px;font-weight:700;color:var(--muted);width:64px;flex-shrink:0}
+.key-row code{flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;color:#7dd3fc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;text-align:left}
+.key-copy{background:transparent;border:1px solid var(--line);color:var(--txt);font-size:10.5px;padding:3px 9px;border-radius:7px;cursor:pointer;flex-shrink:0;font-family:inherit}
+.key-copy:hover{border-color:var(--accent2);color:var(--accent2)}
+.api-eps{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;color:#9fb3d1;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px;line-height:1.9;text-align:left;white-space:pre;overflow-x:auto;margin:0 0 8px}
+.api-curl{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;background:#0a101f;border:1px solid var(--line);border-radius:10px;padding:10px 12px;overflow-x:auto;line-height:1.8;color:#d7e3f8;white-space:pre;text-align:left;margin:0}
 
 /* ─── توست‌ها ─── */
 #toasts{pointer-events:none;position:fixed;left:0;right:0;bottom:96px;z-index:70;display:flex;flex-direction:column;align-items:center;gap:8px;padding:0 16px}
@@ -305,7 +395,15 @@ const PAGE_JS = String.raw`
 'use strict';
 
 /* ================= ثابت‌ها ================= */
-var MODELS = ['claude-fable-5.1', 'claude-sonnet-4.5', 'gpt-4o', 'gemini-2.0-flash', 'deepseek-chat'];
+var MODELS = [
+  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic' },
+  { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic' },
+  { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic' },
+  { id: 'gpt-5.6-sol',      name: 'GPT 5.6 Sol',      vendor: 'OpenAI' },
+  { id: 'gpt-5.6-terra',    name: 'GPT 5.6 Terra',    vendor: 'OpenAI' },
+  { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI' },
+  { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI' }
+];
 var DEFAULT_SETTINGS = { modelId: 'claude-fable-5.1', thinking: false, deepSearch: false, stream: true, systemPrompt: '' };
 var MAX_RAW_LOG = 80 * 1024; // پنل Raw SSE: نگه‌داری آخرین ~80KB
 
@@ -1494,6 +1592,50 @@ function autoResize() {
   ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
 }
 
+/* ═══════════ بخش API و کلیدها در مودال تنظیمات ═══════════ */
+function renderApiInfo() {
+  var FM = window.__FM__ || {};
+  var openaiKey = FM.openaiKey || '—';
+  var anthropicKey = FM.anthropicKey || '—';
+  var base = window.location.origin;
+  var model = (settings.modelId || FM.defaultModel || 'claude-fable-5.1').trim() || 'claude-fable-5.1';
+
+  var ko = $('key-openai');
+  var ka = $('key-anthropic');
+  if (ko) ko.textContent = openaiKey;
+  if (ka) ka.textContent = anthropicKey;
+
+  var eps = $('api-eps');
+  if (eps) {
+    eps.textContent = 'POST ' + base + '/v1/chat/completions    (OpenAI-compatible)\nPOST ' + base + '/v1/messages               (Anthropic-compatible)\nGET  ' + base + '/v1/models';
+  }
+
+  var curl = $('api-curl');
+  if (curl) {
+    curl.textContent =
+      '# OpenAI\ncurl ' + base + '/v1/chat/completions \\\n' +
+      '  -H "Authorization: Bearer ' + openaiKey + '" \\\n' +
+      '  -H "Content-Type: application/json" \\\n' +
+      '  -d \'{"model":"' + model + '","messages":[{"role":"user","content":"Hello"}],"stream":true}\'\n\n' +
+      '# Anthropic\ncurl ' + base + '/v1/messages \\\n' +
+      '  -H "x-api-key: ' + anthropicKey + '" \\\n' +
+      '  -H "anthropic-version: 2023-06-01" \\\n' +
+      '  -H "Content-Type: application/json" \\\n' +
+      '  -d \'{"model":"' + model + '","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}\'';
+  }
+
+  var b1 = $('btn-key-openai');
+  var b2 = $('btn-key-anthropic');
+  if (b1) b1.addEventListener('click', async function () {
+    var ok = await copyText(openaiKey);
+    if (ok) { b1.textContent = 'کپی شد ✓'; setTimeout(function () { b1.textContent = 'کپی'; }, 1500); }
+  });
+  if (b2) b2.addEventListener('click', async function () {
+    var ok = await copyText(anthropicKey);
+    if (ok) { b2.textContent = 'کپی شد ✓'; setTimeout(function () { b2.textContent = 'کپی'; }, 1500); }
+  });
+}
+
 /* ═══════════ اتصال رویدادها و شروع ═══════════ */
 
 function init() {
@@ -1555,6 +1697,9 @@ function init() {
     closeSettings();
     toast('تنظیمات ذخیره شد ✓');
   });
+
+  // بخش API و کلیدها (مقادیر از سرور تزریق شده‌اند)
+  renderApiInfo();
 
   // کامپوزر
   var ta = $('ta');
@@ -1627,6 +1772,14 @@ if (document.readyState === 'loading') {
 /* ═══════════════════════════════════════════════════════════════════════════
    صفحهٔ HTML (ترکیب CSS و JS بالا)
    ═══════════════════════════════════════════════════════════════════════════ */
+/* دیتای تزریق‌شده به کلاینت (مدل‌ها + کلیدهای API برای بخش ⚙️ تنظیمات) */
+const SERVER_DATA_JSON = JSON.stringify({
+  models: FM_MODELS,
+  defaultModel: DEFAULT_MODEL_ID,
+  openaiKey: API_KEYS.openai,
+  anthropicKey: API_KEYS.anthropic,
+});
+
 const PAGE_HTML = `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
@@ -1650,11 +1803,13 @@ ${PAGE_CSS}
     <div class="brand"><span class="brand-ic">✨</span><span>چت هوشمند</span></div>
     <input id="model-inp" list="fm-models" aria-label="شناسه مدل" placeholder="modelId" spellcheck="false" autocomplete="off">
     <datalist id="fm-models">
-      <option value="claude-fable-5.1"></option>
-      <option value="claude-sonnet-4.5"></option>
-      <option value="gpt-4o"></option>
-      <option value="gemini-2.0-flash"></option>
-      <option value="deepseek-chat"></option>
+      <option value="claude-sonnet-5">Claude Sonnet 5 — Anthropic</option>
+      <option value="claude-fable-5">Claude Fable 5 — Anthropic</option>
+      <option value="claude-fable-5.1">Claude Fable 5.1 — Anthropic</option>
+      <option value="gpt-5.6-sol">GPT 5.6 Sol — OpenAI</option>
+      <option value="gpt-5.6-terra">GPT 5.6 Terra — OpenAI</option>
+      <option value="glm-5.2">GLM 5.2 — Z.AI</option>
+      <option value="kimi-k3">Kimi K3 — Moonshot AI</option>
     </datalist>
     <div class="opts" role="group" aria-label="گزینه‌های مدل">
       <label><input type="checkbox" id="ck-thinking"> تفکر</label>
@@ -1735,6 +1890,14 @@ ${PAGE_CSS}
       <label for="sys-prompt" class="m-label">System Prompt (اختیاری)</label>
       <textarea id="sys-prompt" rows="5" dir="auto" placeholder="مثلاً: همیشه به فارسی و خلاصه پاسخ بده…"></textarea>
       <p class="m-hint">این متن در هر درخواست به‌صورت اولین پیام {role:"system"} به مدل ارسال می‌شود. گفتگوها و تنظیمات به‌صورت محلی در مرورگر شما ذخیره می‌شوند.</p>
+      <div class="api-sec">
+        <h4>🔑 اندپوینت‌های API و کلیدها</h4>
+        <p class="api-hint">این سرور هم‌زمان API سازگار با OpenAI و Anthropic ارائه می‌دهد؛ کلیدها در اولین اجرای سرور ساخته و در فایل api-keys.json ذخیره شده‌اند.</p>
+        <div class="key-row"><span class="key-tag">OpenAI</span><code id="key-openai" dir="ltr">—</code><button id="btn-key-openai" class="key-copy" type="button">کپی</button></div>
+        <div class="key-row"><span class="key-tag">Anthropic</span><code id="key-anthropic" dir="ltr">—</code><button id="btn-key-anthropic" class="key-copy" type="button">کپی</button></div>
+        <div id="api-eps" class="api-eps" dir="ltr"></div>
+        <pre id="api-curl" class="api-curl" dir="ltr"></pre>
+      </div>
       <div class="m-foot">
         <button id="modal-cancel" class="hbtn" type="button">انصراف</button>
         <button id="modal-save" class="btn-primary" type="button">ذخیره</button>
@@ -1746,6 +1909,9 @@ ${PAGE_CSS}
   <div id="toasts" aria-live="polite"></div>
 
 </div>
+<script>
+window.__FM__ = ${SERVER_DATA_JSON};
+</script>
 <script>
 ${PAGE_JS}
 </script>
@@ -1843,10 +2009,22 @@ async function handleChat(req, res) {
       return;
     }
 
+    /* نرمال‌سازی نام مدل (مقاوم): «Claude Fable 5.1» و «claude_fable 5.1» هم قبول می‌شود */
+    let bodyOut = body.data;
+    try {
+      const j = JSON.parse(body.data);
+      if (j && typeof j === 'object' && 'modelId' in j) {
+        j.modelId = resolveModelId(j.modelId);
+        bodyOut = JSON.stringify(j);
+      }
+    } catch (e) {
+      /* بدنهٔ JSON معتبر نبود — همان خام به آپستریم می‌رود */
+    }
+
     /* اتصال به آپستریم */
     let up;
     try {
-      up = await openUpstream(body.data, UPSTREAM_TIMEOUT_MS);
+      up = await openUpstream(bodyOut, UPSTREAM_TIMEOUT_MS);
     } catch (err) {
       const msg = (err && err.message) || String(err);
       const isTimeout = /timeout/i.test(msg);
@@ -1941,7 +2119,7 @@ function handlePing(res) {
   const started = Date.now();
   const body = JSON.stringify({
     messages: [{ role: 'user', content: 'ping' }],
-    modelId: 'claude-fable-5.1',
+    modelId: DEFAULT_MODEL_ID,
     thinking: false,
     deepSearch: false,
     stream: false,
@@ -1999,6 +2177,661 @@ function handlePing(res) {
   upReq.end();
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   اندپوینت‌های سازگار OpenAI و Anthropic
+   • GET  /v1/models            ← لیست مدل‌ها (فرمت OpenAI)
+   • POST /v1/chat/completions  ← فرمت OpenAI (Authorization: Bearer)
+   • POST /v1/messages          ← فرمت Anthropic (x-api-key + anthropic-version)
+   هر دو حالت استریم (SSE) و غیراستریم پشتیبانی می‌شود؛ پاسخ آپستریم با
+   پارسر جهانی به فرمت استاندارد هر API تبدیل می‌شود.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/** گرفتن توکن از هدر Authorization: Bearer */
+function getBearerToken(req) {
+  const h = req.headers['authorization'];
+  if (!h) return null;
+  const m = /^Bearer\s+(.+)$/i.exec(String(h).trim());
+  return m ? m[1].trim() : null;
+}
+
+/** خطا به فرمت OpenAI */
+function openaiError(res, status, message, code) {
+  sendJson(res, status, {
+    error: {
+      message: message,
+      type: status === 401 ? 'invalid_request_error' : status >= 500 ? 'api_error' : 'invalid_request_error',
+      param: null,
+      code: code == null ? null : code,
+    },
+  });
+}
+
+/** خطا به فرمت Anthropic */
+function anthropicError(res, status, type, message) {
+  sendJson(res, status, { type: 'error', error: { type: type, message: message } });
+}
+
+/** تبدیل محتوای پیام (رشته یا آرایهٔ بلوک) به متن ساده برای آپستریم */
+function flattenContent(c) {
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) {
+    let s = '';
+    for (const b of c) {
+      if (typeof b === 'string') s += b;
+      else if (b && typeof b === 'object' && typeof b.text === 'string') s += b.text;
+    }
+    return s;
+  }
+  return '';
+}
+
+/** خواندن کامل یک استریم آپستریم به رشته (با سقف) */
+function readStreamText(stream, cap) {
+  return new Promise((resolve) => {
+    let s = '';
+    stream.on('data', (c) => {
+      if (s.length < cap) s += c.toString('utf8');
+      else safeDestroy(stream);
+    });
+    stream.on('end', () => resolve(s));
+    stream.on('error', () => resolve(s));
+  });
+}
+
+/** پارسر SSE سمت سرور (همان منطق پارسر کلاینت) → دلتای {text, reasoning, error} */
+function makeUpstreamParser(onDelta) {
+  let buf = '';
+  let pendingJson = '';
+
+  function applyObject(obj) {
+    const out = { text: '', reasoning: '', error: null };
+    const addText = (v) => {
+      if (typeof v === 'string') out.text += v;
+      else if (Array.isArray(v)) {
+        for (const b of v) {
+          if (typeof b === 'string') out.text += b;
+          else if (b && typeof b === 'object' && typeof b.text === 'string') out.text += b.text;
+        }
+      }
+    };
+    const addReason = (v) => {
+      if (typeof v === 'string') out.reasoning += v;
+    };
+    if (!obj || typeof obj !== 'object') {
+      if (typeof obj === 'string' && obj) out.text += obj;
+    } else {
+      /* سبک OpenAI: choices[0].delta / choices[0].message */
+      const choice = Array.isArray(obj.choices) ? obj.choices[0] : undefined;
+      if (choice && typeof choice === 'object') {
+        const d = choice.delta;
+        const m = choice.message;
+        if (d && typeof d === 'object') {
+          addText(d.content); addText(d.text);
+          addReason(d.reasoning_content); addReason(d.reasoning); addReason(d.thinking);
+        }
+        if (m && typeof m === 'object') {
+          addText(m.content); addText(m.text);
+          addReason(m.reasoning_content); addReason(m.reasoning); addReason(m.thinking);
+        }
+        if (typeof choice.text === 'string') addText(choice.text);
+      }
+      /* سبک Claude: delta.thinking و امثال آن */
+      const td = obj.delta;
+      if (td && typeof td === 'object') {
+        addText(td.text); addText(td.content);
+        addReason(td.thinking); addReason(td.reasoning_content); addReason(td.reasoning);
+      }
+      const tm = obj.message;
+      if (tm && typeof tm === 'object') {
+        addText(tm.content); addText(tm.text);
+        addReason(tm.reasoning_content); addReason(tm.thinking);
+      }
+      /* فیلدهای مستقیم ریشه */
+      addText(obj.content); addText(obj.text);
+      addReason(obj.reasoning_content); addReason(obj.reasoning); addReason(obj.thinking);
+      /* خطای داخل استریم */
+      if (obj.error) {
+        out.error = typeof obj.error === 'string'
+          ? obj.error
+          : (obj.error && typeof obj.error.message === 'string')
+            ? obj.error.message
+            : JSON.stringify(obj.error);
+      }
+    }
+    if (out.text || out.reasoning || out.error) onDelta(out);
+  }
+
+  function handlePayload(p) {
+    const t = p.trim();
+    if (!t || t === '[DONE]') return;
+    if (t.charAt(0) === '{' || t.charAt(0) === '[') {
+      pendingJson = pendingJson ? pendingJson + '\n' + p : p;
+      try {
+        applyObject(JSON.parse(pendingJson));
+        pendingJson = '';
+      } catch (e) {
+        /* هنوز ناقص است — با خط بعدی کامل می‌شود */
+      }
+    } else {
+      if (pendingJson) {
+        const s = pendingJson;
+        pendingJson = '';
+        applyObject(s); // JSON ناتمام → خام
+      }
+      applyObject(p); // رشتهٔ خام غیر JSON → متن
+    }
+  }
+
+  function processLine(line) {
+    if (!line) return;
+    if (line.charAt(0) === ':') return; // کامنت SSE
+    if (line.indexOf('data:') === 0) {
+      let p = line.slice(5);
+      if (p.charAt(0) === ' ') p = p.slice(1);
+      handlePayload(p);
+      return;
+    }
+    if (/^(event|id|retry)\s*:/i.test(line)) return; // متادیتای SSE
+    handlePayload(line); // خط خام بدون data:
+  }
+
+  return {
+    push(chunk) {
+      buf += chunk;
+      let nl;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl).replace(/\r$/, '');
+        buf = buf.slice(nl + 1);
+        processLine(line);
+      }
+    },
+    end() {
+      if (buf.trim()) {
+        processLine(buf.replace(/\r$/, ''));
+        buf = '';
+      }
+      if (pendingJson) {
+        const s = pendingJson;
+        pendingJson = '';
+        applyObject(s);
+      }
+    },
+  };
+}
+
+/** تجمیع کامل بدنهٔ آپستریم (پاسخ غیراستریم) به متن/تفکر/خطا */
+function collectUpstreamText(full) {
+  const acc = { text: '', reasoning: '', error: null };
+  const p = makeUpstreamParser((d) => {
+    acc.text += d.text;
+    acc.reasoning += d.reasoning;
+    if (d.error && !acc.error) acc.error = d.error;
+  });
+  p.push(String(full || ''));
+  p.end();
+  if (!acc.text && !acc.reasoning && !acc.error) {
+    const s = String(full || '').trim();
+    if (s) acc.text = s;
+  }
+  return acc;
+}
+
+/* ---------- GET /v1/models — لیست مدل‌ها (فرمت OpenAI) ---------- */
+function handleModels(req, res) {
+  const key = getBearerToken(req) || (req.headers['x-api-key'] || '').trim();
+  if (!keyIsValid(key)) {
+    logReq('yellow', 'GET /v1/models → 401 (کلید نامعتبر)');
+    openaiError(res, 401, 'کلید API نامعتبر است. کلید را از بنر اجرا یا بخش ⚙️ تنظیمات بگیرید.', 'invalid_api_key');
+    return;
+  }
+  sendJson(res, 200, {
+    object: 'list',
+    data: FM_MODELS.map((m) => ({
+      id: m.id,
+      object: 'model',
+      created: BOOT_AT,
+      owned_by: 'freemodels-' + m.vendor.toLowerCase().replace(/\s+/g, '-'),
+    })),
+  });
+  logReq('green', 'GET /v1/models → 200');
+}
+
+/* ---------- POST /v1/chat/completions — سازگار OpenAI ---------- */
+async function handleOpenAI(req, res) {
+  const started = Date.now();
+  const log = (color, msg) => logReq(color, 'POST /v1/chat/completions ' + msg);
+
+  try {
+    /* احراز هویت: Authorization: Bearer <key> */
+    const key = getBearerToken(req);
+    if (!keyIsValid(key)) {
+      log('yellow', '→ 401');
+      openaiError(res, 401, 'کلید API نامعتبر است (هدر Authorization: Bearer).', 'invalid_api_key');
+      return;
+    }
+
+    const body = await readBody(req, MAX_BODY_BYTES);
+    if (body.tooLarge) {
+      openaiError(res, 413, 'حجم درخواست بیش از حد مجاز (۵ مگابایت) است.');
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(body.data || '{}');
+    } catch (e) {
+      openaiError(res, 400, 'بدنهٔ JSON نامعتبر است.');
+      return;
+    }
+
+    /* پیام‌ها → فرمت آپستریم (نقش‌های ناشناخته → user) */
+    const upstreamMsgs = [];
+    const msgsIn = Array.isArray(parsed.messages) ? parsed.messages : [];
+    for (const m of msgsIn) {
+      if (!m || typeof m !== 'object') continue;
+      const role = m.role === 'assistant' || m.role === 'system' ? m.role : 'user';
+      const content = flattenContent(m.content);
+      if (content) upstreamMsgs.push({ role: role, content: content });
+    }
+    if (!upstreamMsgs.length) {
+      openaiError(res, 400, 'messages باید آرایه‌ای غیرخالی از پیام‌ها باشد.');
+      return;
+    }
+
+    const model = resolveModelId(parsed.model);
+    const wantStream = !!parsed.stream;
+    const payload = {
+      messages: upstreamMsgs,
+      modelId: model,
+      thinking: parsed.thinking === true,      // اکستنشن غیراستاندارد (اختیاری)
+      deepSearch: parsed.deep_search === true, // اکستنشن غیراستاندارد (اختیاری)
+      stream: wantStream,
+    };
+
+    const promptChars = upstreamMsgs.reduce((n, m) => n + m.content.length, 0);
+    const estIn = Math.max(1, Math.ceil(promptChars / 4));
+    const id = 'chatcmpl-' + crypto.randomBytes(10).toString('hex');
+    const created = Math.floor(Date.now() / 1000);
+
+    /* ─────────── پاسخ کامل (غیراستریم) ─────────── */
+    if (!wantStream) {
+      let up;
+      try {
+        up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS);
+      } catch (err) {
+        const msg = (err && err.message) || String(err);
+        log('red', '✖ ' + msg);
+        openaiError(res, /timeout/i.test(msg) ? 504 : 502, 'اتصال به سرویس چت برقرار نشد: ' + msg);
+        return;
+      }
+      if (up.status >= 400) {
+        const txt = await readStreamText(up.res, 4000);
+        safeDestroy(up.req);
+        log('red', '← آپستریم ' + up.status);
+        openaiError(res, up.status, 'خطای سرویس چت (HTTP ' + up.status + '): ' + txt.trim().slice(0, 300));
+        return;
+      }
+      const full = await readStreamText(up.res, 8 * 1024 * 1024);
+      const acc = collectUpstreamText(full);
+      const content = acc.text || acc.reasoning || '⚠️ پاسخ خالی از سرور دریافت شد.';
+      const estOut = Math.max(1, Math.ceil(content.length / 4));
+      sendJson(res, 200, {
+        id: id,
+        object: 'chat.completion',
+        created: created,
+        model: model,
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: content },
+            logprobs: null,
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: estIn, completion_tokens: estOut, total_tokens: estIn + estOut },
+      });
+      log('green', '→ 200 (' + (Date.now() - started) + 'ms · ' + content.length + ' کاراکتر)');
+      return;
+    }
+
+    /* ─────────── استریم SSE به سبک OpenAI ─────────── */
+    res.writeHead(200, Object.assign(
+      {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      },
+      OPEN_CORS
+    ));
+    res.write(': connected\n\n');
+
+    const includeUsage = !!(parsed.stream_options && parsed.stream_options.include_usage);
+    let outChars = 0;
+    let gotText = false;
+    let gotReasoning = false;
+    let finished = false;
+
+    const chunk = (delta, finish) => {
+      if (finished) return;
+      const obj = {
+        id: id,
+        object: 'chat.completion.chunk',
+        created: created,
+        model: model,
+        choices: [{ index: 0, delta: delta, finish_reason: finish == null ? null : finish }],
+      };
+      try {
+        res.write('data: ' + JSON.stringify(obj) + '\n\n');
+      } catch (e) {
+        /* کلاینت رفته */
+      }
+    };
+    const endStream = () => {
+      if (finished) return;
+      finished = true;
+      chunk({}, 'stop');
+      if (includeUsage) {
+        const estOut = Math.max(1, Math.ceil(outChars / 4));
+        try {
+          res.write('data: ' + JSON.stringify({
+            id: id, object: 'chat.completion.chunk', created: created, model: model,
+            choices: [],
+            usage: { prompt_tokens: estIn, completion_tokens: estOut, total_tokens: estIn + estOut },
+          }) + '\n\n');
+        } catch (e) { /* noop */ }
+      }
+      try {
+        res.write('data: [DONE]\n\n');
+        res.end();
+      } catch (e) { /* noop */ }
+      log('green', '→ استریم تمام شد (' + (Date.now() - started) + 'ms · ' + outChars + ' کاراکتر)');
+    };
+
+    const parser = makeUpstreamParser((d) => {
+      if (d.error) {
+        chunk({ content: '\n\n⚠️ ' + d.error });
+        return;
+      }
+      if (d.reasoning) {
+        gotReasoning = true;
+        chunk({ reasoning_content: d.reasoning });
+      }
+      if (d.text) {
+        gotText = true;
+        outChars += d.text.length;
+        chunk({ content: d.text });
+      }
+    });
+
+    let up;
+    try {
+      up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS);
+    } catch (err) {
+      chunk({ content: '⚠️ اتصال به سرویس چت برقرار نشد: ' + ((err && err.message) || err) });
+      endStream();
+      return;
+    }
+    if (up.status >= 400) {
+      const txt = await readStreamText(up.res, 4000);
+      chunk({ content: '⚠️ خطای سرویس چت (HTTP ' + up.status + '): ' + txt.trim().slice(0, 200) });
+      endStream();
+      return;
+    }
+
+    chunk({ role: 'assistant', content: '' }); // چانک اول: نقش
+    up.res.on('data', (c) => parser.push(c.toString('utf8')));
+    up.res.on('end', () => {
+      parser.end();
+      if (!gotText && !gotReasoning) chunk({ content: '⚠️ پاسخ خالی از سرور دریافت شد.' });
+      endStream();
+    });
+    up.res.on('error', () => endStream());
+    /* قطع کلاینت → قطع آپستریم */
+    res.on('close', () => {
+      finished = true;
+      safeDestroy(up.req);
+    });
+  } catch (e) {
+    logReq('red', 'POST /v1/chat/completions ✖ ' + ((e && e.message) || e));
+    if (!res.headersSent) openaiError(res, 500, 'خطای داخلی سرور');
+    else try { res.end(); } catch (e2) { /* noop */ }
+  }
+}
+
+/* ---------- POST /v1/messages — سازگار Anthropic ---------- */
+async function handleAnthropic(req, res) {
+  const started = Date.now();
+  const log = (color, msg) => logReq(color, 'POST /v1/messages ' + msg);
+
+  try {
+    /* احراز هویت: x-api-key (یا Bearer به‌عنوان جایگزین) */
+    const key = (req.headers['x-api-key'] || '').trim() || getBearerToken(req);
+    if (!keyIsValid(key)) {
+      log('yellow', '→ 401');
+      anthropicError(res, 401, 'authentication_error', 'کلید API نامعتبر است (هدر x-api-key).');
+      return;
+    }
+
+    const body = await readBody(req, MAX_BODY_BYTES);
+    if (body.tooLarge) {
+      anthropicError(res, 413, 'invalid_request_error', 'حجم درخواست بیش از حد مجاز (۵ مگابایت) است.');
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(body.data || '{}');
+    } catch (e) {
+      anthropicError(res, 400, 'invalid_request_error', 'بدنهٔ JSON نامعتبر است.');
+      return;
+    }
+
+    /* طبق قوانین Anthropic: model و max_tokens اجباری‌اند */
+    if (!parsed.model || typeof parsed.model !== 'string') {
+      anthropicError(res, 400, 'invalid_request_error', 'model: Field required');
+      return;
+    }
+    if (typeof parsed.max_tokens !== 'number') {
+      anthropicError(res, 400, 'invalid_request_error', 'max_tokens: Field required');
+      return;
+    }
+
+    /* system (رشته یا بلوک) + messages → فرمت آپستریم */
+    const upstreamMsgs = [];
+    let sysText = '';
+    if (typeof parsed.system === 'string') sysText = parsed.system;
+    else if (Array.isArray(parsed.system)) sysText = parsed.system.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('\n');
+    if (sysText.trim()) upstreamMsgs.push({ role: 'system', content: sysText.trim() });
+
+    const msgsIn = Array.isArray(parsed.messages) ? parsed.messages : [];
+    for (const m of msgsIn) {
+      if (!m || typeof m !== 'object') continue;
+      const content = flattenContent(m.content);
+      if (content) upstreamMsgs.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: content });
+    }
+    if (!upstreamMsgs.length) {
+      anthropicError(res, 400, 'invalid_request_error', 'messages: at least one message is required');
+      return;
+    }
+
+    const model = resolveModelId(parsed.model);
+    const wantStream = !!parsed.stream;
+    const payload = {
+      messages: upstreamMsgs,
+      modelId: model,
+      thinking: parsed.thinking === true, // اکستنشن غیراستاندارد (اختیاری)
+      deepSearch: false,
+      stream: wantStream,
+    };
+
+    const promptChars = upstreamMsgs.reduce((n, m) => n + m.content.length, 0);
+    const estIn = Math.max(1, Math.ceil(promptChars / 4));
+    const msgId = 'msg_' + crypto.randomBytes(10).toString('hex');
+    const version = String(req.headers['anthropic-version'] || '2023-06-01');
+
+    /* ─────────── پاسخ کامل ─────────── */
+    if (!wantStream) {
+      let up;
+      try {
+        up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS);
+      } catch (err) {
+        const msg = (err && err.message) || String(err);
+        log('red', '✖ ' + msg);
+        anthropicError(res, /timeout/i.test(msg) ? 504 : 502, 'api_error', 'اتصال به سرویس چت برقرار نشد: ' + msg);
+        return;
+      }
+      if (up.status >= 400) {
+        const txt = await readStreamText(up.res, 4000);
+        safeDestroy(up.req);
+        log('red', '← آپستریم ' + up.status);
+        anthropicError(res, up.status, up.status === 429 ? 'rate_limit_error' : 'api_error', 'خطای سرویس چت (HTTP ' + up.status + '): ' + txt.trim().slice(0, 300));
+        return;
+      }
+      const full = await readStreamText(up.res, 8 * 1024 * 1024);
+      const acc = collectUpstreamText(full);
+      const blocks = [];
+      if (acc.reasoning) blocks.push({ type: 'thinking', thinking: acc.reasoning });
+      blocks.push({ type: 'text', text: acc.text || (acc.error ? '⚠️ ' + acc.error : '') });
+      if (!acc.text && !acc.reasoning && !acc.error) blocks.push({ type: 'text', text: '⚠️ پاسخ خالی از سرور دریافت شد.' });
+      sendJson(res, 200, {
+        id: msgId,
+        type: 'message',
+        role: 'assistant',
+        model: model,
+        content: blocks,
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: estIn, output_tokens: Math.max(1, Math.ceil((acc.text || '').length / 4)) },
+      });
+      log('green', '→ 200 (' + (Date.now() - started) + 'ms · anthropic-version ' + version + ')');
+      return;
+    }
+
+    /* ─────────── استریم SSE به سبک Anthropic ─────────── */
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const ev = (name, obj) => {
+      try {
+        res.write('event: ' + name + '\ndata: ' + JSON.stringify(obj) + '\n\n');
+      } catch (e) { /* noop */ }
+    };
+
+    ev('message_start', {
+      type: 'message_start',
+      message: {
+        id: msgId,
+        type: 'message',
+        role: 'assistant',
+        model: model,
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: estIn, output_tokens: 0 },
+      },
+    });
+    ev('ping', { type: 'ping' });
+
+    let blockIdx = -1;
+    let blockType = null;
+    let outChars = 0;
+    let gotAny = false;
+    let finished = false;
+
+    const closeBlock = () => {
+      if (blockType) {
+        ev('content_block_stop', { type: 'content_block_stop', index: blockIdx });
+        blockType = null;
+      }
+    };
+    const openBlock = (t) => {
+      if (blockType === t) return;
+      closeBlock();
+      blockIdx++;
+      blockType = t;
+      ev('content_block_start', {
+        type: 'content_block_start',
+        index: blockIdx,
+        content_block: t === 'text' ? { type: 'text', text: '' } : { type: 'thinking', thinking: '' },
+      });
+    };
+    const endStream = () => {
+      if (finished) return;
+      finished = true;
+      closeBlock();
+      ev('message_delta', {
+        type: 'message_delta',
+        delta: { stop_reason: 'end_turn', stop_sequence: null },
+        usage: { output_tokens: Math.max(1, Math.ceil(outChars / 4)) },
+      });
+      ev('message_stop', { type: 'message_stop' });
+      try {
+        res.end();
+      } catch (e) { /* noop */ }
+      log('green', '→ استریم تمام شد (' + (Date.now() - started) + 'ms · ' + outChars + ' کاراکتر)');
+    };
+
+    const parser = makeUpstreamParser((d) => {
+      if (d.error) {
+        openBlock('text');
+        ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: '\n\n⚠️ ' + d.error } });
+        return;
+      }
+      if (d.reasoning) {
+        gotAny = true;
+        openBlock('thinking');
+        ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'thinking_delta', thinking: d.reasoning } });
+      }
+      if (d.text) {
+        gotAny = true;
+        openBlock('text');
+        outChars += d.text.length;
+        ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: d.text } });
+      }
+    });
+
+    let up;
+    try {
+      up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS);
+    } catch (err) {
+      openBlock('text');
+      ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: '⚠️ اتصال به سرویس چت برقرار نشد: ' + ((err && err.message) || err) } });
+      endStream();
+      return;
+    }
+    if (up.status >= 400) {
+      const txt = await readStreamText(up.res, 4000);
+      openBlock('text');
+      ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: '⚠️ خطای سرویس چت (HTTP ' + up.status + '): ' + txt.trim().slice(0, 200) } });
+      endStream();
+      return;
+    }
+
+    up.res.on('data', (c) => parser.push(c.toString('utf8')));
+    up.res.on('end', () => {
+      parser.end();
+      if (!gotAny) {
+        openBlock('text');
+        ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: '⚠️ پاسخ خالی از سرور دریافت شد.' } });
+      }
+      endStream();
+    });
+    up.res.on('error', () => endStream());
+    /* قطع کلاینت → قطع آپستریم */
+    res.on('close', () => {
+      finished = true;
+      safeDestroy(up.req);
+    });
+  } catch (e) {
+    logReq('red', 'POST /v1/messages ✖ ' + ((e && e.message) || e));
+    if (!res.headersSent) anthropicError(res, 500, 'api_error', 'خطای داخلی سرور');
+    else try { res.end(); } catch (e2) { /* noop */ }
+  }
+}
+
 /* ---------- سرور اصلی و مسیریابی ---------- */
 const PORT = parseInt(process.env.PORT || '3000', 10) || 3000;
 const HOST = '127.0.0.1';
@@ -2032,6 +2865,20 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /* ─── اندپوینت‌های سازگار OpenAI و Anthropic ─── */
+  if (req.method === 'GET' && path === '/v1/models') {
+    handleModels(req, res);
+    return;
+  }
+  if (req.method === 'POST' && path === '/v1/chat/completions') {
+    handleOpenAI(req, res);
+    return;
+  }
+  if (req.method === 'POST' && path === '/v1/messages') {
+    handleAnthropic(req, res);
+    return;
+  }
+
   /* بقیه → 404 */
   res.writeHead(404, Object.assign({ 'Content-Type': 'text/plain; charset=utf-8' }, OPEN_CORS));
   res.end('404 — مسیر یافت نشد');
@@ -2052,7 +2899,14 @@ server.listen(PORT, HOST, () => {
   console.log('   \x1b[32m●\x1b[0m آدرس محلی : \x1b[1;34mhttp://127.0.0.1:' + PORT + '/\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m پورت      : \x1b[33m' + PORT + '\x1b[0m \x1b[2m(متغیر محیطی PORT)\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m آپستریم   : \x1b[2m' + UPSTREAM_URL + '\x1b[0m');
+  console.log('   \x1b[32m●\x1b[0m مدل‌ها     : \x1b[2m' + FM_MODELS.map((m) => m.id).join(' · ') + '\x1b[0m');
+  console.log('   \x1b[32m●\x1b[0m OpenAI API: \x1b[1;34mPOST /v1/chat/completions\x1b[0m \x1b[2m| GET /v1/models\x1b[0m');
+  console.log('   \x1b[32m●\x1b[0m Anthropic : \x1b[1;34mPOST /v1/messages\x1b[0m \x1b[2m(سازگار SDK آنتروپیک)\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m زمان شروع : \x1b[2m' + new Date().toLocaleString('en-GB') + '\x1b[0m');
+  console.log('');
+  console.log('   \x1b[1;33m🔑 کلید OpenAI   (Authorization: Bearer):\x1b[0m ' + API_KEYS.openai);
+  console.log('   \x1b[1;33m🔑 کلید Anthropic (x-api-key):\x1b[0m           ' + API_KEYS.anthropic);
+  console.log('   \x1b[2mفایل کلیدها: ' + KEY_FILE + '\x1b[0m');
   console.log('');
   logReq('green', 'سرور روی ' + HOST + ':' + PORT + ' آماده است ✓');
 });

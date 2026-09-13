@@ -47,7 +47,15 @@ interface Settings {
 }
 
 /* ---------- ثابت‌ها ---------- */
-const MODELS = ['claude-fable-5.1', 'claude-sonnet-4.5', 'gpt-4o', 'gemini-2.0-flash', 'deepseek-chat'];
+const MODELS = [
+  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic' },
+  { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic' },
+  { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic' },
+  { id: 'gpt-5.6-sol',      name: 'GPT 5.6 Sol',      vendor: 'OpenAI' },
+  { id: 'gpt-5.6-terra',    name: 'GPT 5.6 Terra',    vendor: 'OpenAI' },
+  { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI' },
+  { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI' },
+];
 const DEFAULT_SETTINGS: Settings = {
   modelId: 'claude-fable-5.1',
   thinking: false,
@@ -395,6 +403,7 @@ export default function ChatApp() {
   const [draftPrompt, setDraftPrompt] = useState('');
   const [toasts, setToasts] = useState<Array<{ id: number; text: string; kind: 'ok' | 'err' }>>([]);
   const [rawBytes, setRawBytes] = useState(0);
+  const [apiKeys, setApiKeys] = useState<{ openai: string; anthropic: string } | null>(null);
 
   /* ----- refs ----- */
   const chatsRef = useRef<Chat[]>([]);
@@ -419,6 +428,15 @@ export default function ChatApp() {
   streamingRef.current = streaming;
   rawOpenRef.current = rawOpen;
   settingsOpenRef.current = settingsOpen;
+
+  // بارگیری کلیدهای API هنگام باز شدن مودال تنظیمات (برای بخش API)
+  useEffect(() => {
+    if (!settingsOpen || apiKeys) return;
+    fetch('/api/keys')
+      .then((r) => r.json())
+      .then((j) => setApiKeys({ openai: j.openai || '', anthropic: j.anthropic || '' }))
+      .catch(() => {});
+  }, [settingsOpen, apiKeys]);
 
   const activeChat = chats.find((c) => c.id === activeId) ?? chats[0];
 
@@ -1016,7 +1034,7 @@ export default function ChatApp() {
         />
         <datalist id="fm-models">
           {MODELS.map((m) => (
-            <option key={m} value={m} />
+            <option key={m.id} value={m.id} label={m.name + ' — ' + m.vendor} />
           ))}
         </datalist>
 
@@ -1319,6 +1337,49 @@ export default function ChatApp() {
                 این متن در هر درخواست به‌صورت اولین پیام <code className="md-icode">{'{role:"system"}'}</code> به مدل ارسال
                 می‌شود. گفتگوها و تنظیمات به‌صورت محلی در مرورگر شما ذخیره می‌شوند.
               </p>
+            </div>
+
+            {/* بخش API سازگار OpenAI و Anthropic */}
+            <div className="space-y-2 border-t border-dashed border-[#243352] pt-4">
+              <h4 className="flex items-center gap-1.5 text-sm font-extrabold text-[#38bdf8]">🔑 اندپوینت‌های API و کلیدها</h4>
+              <p className="text-[11px] leading-6 text-slate-500">
+                این سرور هم‌زمان API سازگار با OpenAI و Anthropic ارائه می‌دهد؛ کلیدها در فایل api-keys.json ذخیره شده‌اند.
+              </p>
+              {(['openai', 'anthropic'] as const).map((kind) => (
+                <div
+                  key={kind}
+                  className="flex items-center gap-2 rounded-xl border border-[#243352] bg-[#0d1730] px-3 py-2"
+                >
+                  <span className="w-16 shrink-0 text-[10.5px] font-bold text-slate-400">
+                    {kind === 'openai' ? 'OpenAI' : 'Anthropic'}
+                  </span>
+                  <code
+                      dir="ltr"
+                      className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left font-mono text-[10.5px] text-sky-300"
+                  >
+                    {apiKeys ? apiKeys[kind] : '…'}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!apiKeys) return;
+                      const ok = await copyText(apiKeys[kind]);
+                      toast(ok ? 'کلید کپی شد ✓' : 'کپی ناموفق بود', ok ? 'ok' : 'err');
+                    }}
+                    className="shrink-0 rounded-lg border border-[#243352] px-2.5 py-1 text-[11px] text-slate-300 hover:border-[#38bdf8] hover:text-[#38bdf8]"
+                  >
+                    کپی
+                  </button>
+                </div>
+              ))}
+              <div
+                dir="ltr"
+                className="rounded-xl border border-[#243352] bg-[#0d1730] px-3 py-2 text-left font-mono text-[10.5px] leading-6 text-slate-400"
+              >
+                <div>POST {typeof window !== 'undefined' ? window.location.origin : ''}/v1/chat/completions (OpenAI-compatible)</div>
+                <div>POST {typeof window !== 'undefined' ? window.location.origin : ''}/v1/messages (Anthropic-compatible)</div>
+                <div>GET&nbsp;&nbsp;{typeof window !== 'undefined' ? window.location.origin : ''}/v1/models</div>
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-2">
