@@ -4,9 +4,12 @@
  *  چت هوشمند — نسخهٔ تک‌فایل Node.js خالص (بدون هیچ وابستگی خارجی)
  * ─────────────────────────────────────────────────────────────────────────────
  *  اجرا:  node app.js          (پورت پیش‌فرض 3000 — با متغیر محیطی PORT قابل تغییر)
+ *          HOST=0.0.0.0 پیش‌فرض است (برای Docker/Railway لازم است)؛ برای اجرای
+ *          فقط-محلی:  HOST=127.0.0.1 node app.js
  *
  *  روت‌ها:
  *    GET  /                    → صفحهٔ HTML چت (فارسی، RTL، تم تاریک)
+ *    GET  /healthz             → بررسی سلامت سبک (بدون تماس با آپستریم) — برای Docker/Railway
  *    POST /api/chat            → پروکسی استریم به آپستریم (SSE زنده، pipe مستقیم)
  *    GET  /api/ping            → تست اتصال به آپستریم → {status, ms, sample}
  *    GET  /v1/models           → لیست مدل‌ها (فرمت OpenAI — عمومی، بدون کلید)
@@ -14,6 +17,14 @@
  *    POST /v1/messages         → اندپوینت سازگار Anthropic (استریم + غیراستریم)
  *    OPTIONS *                 → 204 با هدرهای CORS باز
  *    بقیه                      → 404
+ *
+ *  متغیرهای محیطی:
+ *    PORT              پورت گوش‌دادن (پیش‌فرض 3000) — Railway آن را تزریق می‌کند
+ *    HOST              آدرس bind (پیش‌فرض 0.0.0.0)
+ *    OPENAI_API_KEY    کلید سبک OpenAI (override فایل کلیدها)
+ *    ANTHROPIC_API_KEY کلید سبک Anthropic (override فایل کلیدها)
+ *    API_KEYS_FILE     مسیر فایل کلیدها (پیش‌فرض: کنار همین فایل)
+ *    EXPOSE_KEYS=false ماسک‌کردن کلیدها در UI (برای استقرار عمومی)
  *
  *  کلیدهای API (طبق قوانین OpenAI و Anthropic): اولین اجرا ساخته و در
  *  api-keys.json کنار همین فایل ذخیره می‌شوند — در بنر اجرا و ⚙️ تنظیمات هم هست.
@@ -101,7 +112,25 @@ function resolveModelId(input) {
    اولین اجرا: ساخته و در api-keys.json کنار همین فایل ذخیره می‌شود؛
    اجراهای بعدی همان‌ها لود می‌شوند. با env هم قابل تعیین دستی است:
    OPENAI_API_KEY / ANTHROPIC_API_KEY */
-const KEY_FILE = path.join(__dirname, 'api-keys.json');
+const KEY_FILE = process.env.API_KEYS_FILE
+  ? (path.isAbsolute(process.env.API_KEYS_FILE)
+      ? process.env.API_KEYS_FILE
+      : path.resolve(__dirname, process.env.API_KEYS_FILE))
+  : path.join(__dirname, 'api-keys.json');
+
+/** آیا کلیدها در UI/بنر نمایش داده شوند؟ (EXPOSE_KEYS=false → ماسک) */
+function keysExposed() {
+  var v = String(process.env.EXPOSE_KEYS == null ? '' : process.env.EXPOSE_KEYS).trim().toLowerCase();
+  if (!v) return true;
+  return !(v === 'false' || v === '0' || v === 'no' || v === 'off');
+}
+
+/** نمایش امن کلید: sk-abcd••••••••wxyz */
+function maskKey(k) {
+  if (!k) return '';
+  if (k.length <= 12) return '•'.repeat(k.length);
+  return k.slice(0, 8) + '••••••••••' + k.slice(-4);
+}
 
 function randomToken(len, alphabet) {
   const abc = alphabet || 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -111,28 +140,51 @@ function randomToken(len, alphabet) {
   return s;
 }
 
+/**
+ * آیا مقدار «کلید واقعی» است؟ placeholder ها (مثل sk-REPLACE_WITH_...) رد می‌شوند
+ * تا هیچ‌وقت یک کلید قابل حدس جای کلید تصادفی امن را نگیرد.
+ */
+function isUsableKey(k) {
+  if (!k || typeof k !== 'string') return false;
+  var v = k.trim();
+  return v.length >= 16 && !/REPLACE|CHANGE_?ME|xxxx+/i.test(v);
+}
+
 function loadOrCreateKeys() {
   const envOpen = (process.env.OPENAI_API_KEY || '').trim();
   const envAnt = (process.env.ANTHROPIC_API_KEY || '').trim();
+  const useEnvOpen = isUsableKey(envOpen);
+  const useEnvAnt = isUsableKey(envAnt);
   try {
     if (fs.existsSync(KEY_FILE)) {
       const j = JSON.parse(fs.readFileSync(KEY_FILE, 'utf8'));
-      if (j && typeof j.openai === 'string' && typeof j.anthropic === 'string' && j.openai && j.anthropic) {
-        return { openai: envOpen || j.openai, anthropic: envAnt || j.anthropic };
+      if (j && isUsableKey(j.openai) && isUsableKey(j.anthropic)) {
+        return {
+          openai: useEnvOpen ? envOpen : j.openai,
+          anthropic: useEnvAnt ? envAnt : j.anthropic,
+        };
       }
     }
   } catch (e) {
     /* فایل خراب — دوباره می‌سازیم */
   }
   const fresh = {
-    openai: envOpen || ('sk-' + randomToken(48)),
-    anthropic: envAnt || ('sk-ant-api03-' + randomToken(88)),
+    openai: useEnvOpen ? envOpen : ('sk-' + randomToken(48)),
+    anthropic: useEnvAnt ? envAnt : ('sk-ant-api03-' + randomToken(88)),
     createdAt: new Date().toISOString(),
   };
+  let persisted = false;
   try {
     fs.writeFileSync(KEY_FILE, JSON.stringify(fresh, null, 2) + '\n', { mode: 0o600 });
+    persisted = true;
   } catch (e) {
     /* فایل‌سیستم اجازه نداد — کلیدها فقط تا پایان اجرا در حافظه می‌مانند */
+  }
+  console.log('[api-keys] منبع کلیدها: ' + (useEnvOpen && useEnvAnt ? 'env (OPENAI_API_KEY + ANTHROPIC_API_KEY)' : persisted ? 'ساخته/خوانده‌شده از ' + KEY_FILE : 'حافظه (تصادفی — فایل قابل نوشتن نبود)'));
+  if (!(useEnvOpen && useEnvAnt)) {
+    console.log('[api-keys] برای پایداری بین ری‌استارت/دیپلوی اینها را در env بگذارید:');
+    console.log('           OPENAI_API_KEY=' + fresh.openai);
+    console.log('           ANTHROPIC_API_KEY=' + fresh.anthropic);
   }
   return { openai: fresh.openai, anthropic: fresh.anthropic };
 }
@@ -1671,11 +1723,18 @@ function renderApiInfo() {
 
   var b1 = $('btn-key-openai');
   var b2 = $('btn-key-anthropic');
+  var exposed = FM.keysExposed !== false;
+  if (!exposed) {
+    if (b1) { b1.disabled = true; b1.textContent = 'مخفی'; b1.title = 'EXPOSE_KEYS=false'; }
+    if (b2) { b2.disabled = true; b2.textContent = 'مخفی'; b2.title = 'EXPOSE_KEYS=false'; }
+  }
   if (b1) b1.addEventListener('click', async function () {
+    if (!exposed) return;
     var ok = await copyText(openaiKey);
     if (ok) { b1.textContent = 'کپی شد ✓'; setTimeout(function () { b1.textContent = 'کپی'; }, 1500); }
   });
   if (b2) b2.addEventListener('click', async function () {
+    if (!exposed) return;
     var ok = await copyText(anthropicKey);
     if (ok) { b2.textContent = 'کپی شد ✓'; setTimeout(function () { b2.textContent = 'کپی'; }, 1500); }
   });
@@ -1946,11 +2005,13 @@ if (document.readyState === 'loading') {
    صفحهٔ HTML (ترکیب CSS و JS بالا)
    ═══════════════════════════════════════════════════════════════════════════ */
 /* دیتای تزریق‌شده به کلاینت (مدل‌ها + کلیدهای API برای بخش ⚙️ تنظیمات) */
+const KEYS_EXPOSED = keysExposed();
 const SERVER_DATA_JSON = JSON.stringify({
   models: FM_MODELS,
   defaultModel: DEFAULT_MODEL_ID,
-  openaiKey: API_KEYS.openai,
-  anthropicKey: API_KEYS.anthropic,
+  openaiKey: KEYS_EXPOSED ? API_KEYS.openai : maskKey(API_KEYS.openai),
+  anthropicKey: KEYS_EXPOSED ? API_KEYS.anthropic : maskKey(API_KEYS.anthropic),
+  keysExposed: KEYS_EXPOSED,
 });
 
 const PAGE_HTML = `<!DOCTYPE html>
@@ -3000,7 +3061,31 @@ async function handleAnthropic(req, res) {
 
 /* ---------- سرور اصلی و مسیریابی ---------- */
 const PORT = parseInt(process.env.PORT || '3000', 10) || 3000;
-const HOST = '127.0.0.1';
+/* پیش‌فرض 0.0.0.0 است تا داخل Docker/Railway قابل دسترس باشد (HOST=127.0.0.1 برای فقط-محلی) */
+const HOST = (process.env.HOST || '0.0.0.0').trim() || '0.0.0.0';
+const STARTED_AT = Date.now();
+
+/* ---------- GET /healthz — سلامت سبک (بدون تماس با آپستریم) ---------- */
+function handleHealthz(res, headOnly) {
+  const body = JSON.stringify({
+    status: 'ok',
+    service: 'smart-chat',
+    runtime: 'single-file-node',
+    uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000),
+    node: process.version,
+    models: FM_MODELS.length,
+    defaultModel: DEFAULT_MODEL_ID,
+    upstream: UPSTREAM_URL,
+    keysExposed: keysExposed(),
+    timestamp: new Date().toISOString(),
+  });
+  res.writeHead(200, Object.assign({
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': String(Buffer.byteLength(body, 'utf8')),
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+  }, OPEN_CORS));
+  res.end(headOnly ? undefined : body);
+}
 
 const server = http.createServer((req, res) => {
   const path = (req.url || '/').split('?')[0];
@@ -3043,6 +3128,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /* سلامت سبک برای Docker/Railway (بدون تماس با آپستریم) */
+  if ((req.method === 'GET' || req.method === 'HEAD') && (path === '/healthz' || path === '/health')) {
+    handleHealthz(res, req.method === 'HEAD');
+    return;
+  }
+
   /* ─── اندپوینت‌های سازگار OpenAI و Anthropic ─── */
   if (req.method === 'GET' && path === '/v1/models') {
     handleModels(req, res);
@@ -3074,16 +3165,23 @@ server.listen(PORT, HOST, () => {
   console.log(C.dim + '┌' + line + '┐' + C.reset);
   console.log('  \x1b[1;36m⚡ چت هوشمند\x1b[0m — \x1b[1;37mنسخهٔ تک‌فایل Node.js\x1b[0m');
   console.log(C.dim + '└' + line + '┘' + C.reset);
-  console.log('   \x1b[32m●\x1b[0m آدرس محلی : \x1b[1;34mhttp://127.0.0.1:' + PORT + '/\x1b[0m');
-  console.log('   \x1b[32m●\x1b[0m پورت      : \x1b[33m' + PORT + '\x1b[0m \x1b[2m(متغیر محیطی PORT)\x1b[0m');
+  const localHost = (HOST === '0.0.0.0' || HOST === '::') ? '127.0.0.1' : HOST;
+  console.log('   \x1b[32m●\x1b[0m آدرس محلی : \x1b[1;34mhttp://' + localHost + ':' + PORT + '/\x1b[0m');
+  console.log('   \x1b[32m●\x1b[0m bind       : \x1b[33m' + HOST + ':' + PORT + '\x1b[0m \x1b[2m(متغیرهای محیطی HOST و PORT)\x1b[0m');
+  console.log('   \x1b[32m●\x1b[0m سلامت     : \x1b[1;34mGET /healthz\x1b[0m \x1b[2m(بدون تماس با آپستریم)\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m آپستریم   : \x1b[2m' + UPSTREAM_URL + '\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m مدل‌ها     : \x1b[2m' + FM_MODELS.map((m) => m.id).join(' · ') + '\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m OpenAI API: \x1b[1;34mPOST /v1/chat/completions\x1b[0m \x1b[2m| GET /v1/models\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m Anthropic : \x1b[1;34mPOST /v1/messages\x1b[0m \x1b[2m(سازگار SDK آنتروپیک)\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m زمان شروع : \x1b[2m' + new Date().toLocaleString('en-GB') + '\x1b[0m');
   console.log('');
-  console.log('   \x1b[1;33m🔑 کلید OpenAI   (Authorization: Bearer):\x1b[0m ' + API_KEYS.openai);
-  console.log('   \x1b[1;33m🔑 کلید Anthropic (x-api-key):\x1b[0m           ' + API_KEYS.anthropic);
+  if (KEYS_EXPOSED) {
+    console.log('   \x1b[1;33m🔑 کلید OpenAI   (Authorization: Bearer):\x1b[0m ' + API_KEYS.openai);
+    console.log('   \x1b[1;33m🔑 کلید Anthropic (x-api-key):\x1b[0m           ' + API_KEYS.anthropic);
+  } else {
+    console.log('   \x1b[1;33m🔑 کلید OpenAI   (Authorization: Bearer):\x1b[0m ' + maskKey(API_KEYS.openai) + '  \x1b[2m(ماسک‌شده: EXPOSE_KEYS=false)\x1b[0m');
+    console.log('   \x1b[1;33m🔑 کلید Anthropic (x-api-key):\x1b[0m           ' + maskKey(API_KEYS.anthropic) + '  \x1b[2m(ماسک‌شده: EXPOSE_KEYS=false)\x1b[0m');
+  }
   console.log('   \x1b[2mفایل کلیدها: ' + KEY_FILE + '\x1b[0m');
   console.log('');
   logReq('green', 'سرور روی ' + HOST + ':' + PORT + ' آماده است ✓');

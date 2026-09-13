@@ -417,7 +417,7 @@ export default function ChatApp() {
   const [draftPrompt, setDraftPrompt] = useState('');
   const [toasts, setToasts] = useState<Array<{ id: number; text: string; kind: 'ok' | 'err' }>>([]);
   const [rawBytes, setRawBytes] = useState(0);
-  const [apiKeys, setApiKeys] = useState<{ openai: string; anthropic: string } | null>(null);
+  const [apiKeys, setApiKeys] = useState<{ openai: string; anthropic: string; exposed?: boolean } | null>(null);
   const [modelPickerOpen, setModelPickerOpen] = useState(false); // پیکر مدل باز است؟
 
   /* ----- refs ----- */
@@ -462,7 +462,7 @@ export default function ChatApp() {
     if (!settingsOpen || apiKeys) return;
     fetch('/api/keys')
       .then((r) => r.json())
-      .then((j) => setApiKeys({ openai: j.openai || '', anthropic: j.anthropic || '' }))
+      .then((j) => setApiKeys({ openai: j.openai || '', anthropic: j.anthropic || '', exposed: j.exposed !== false }))
       .catch(() => {});
   }, [settingsOpen, apiKeys]);
 
@@ -1448,7 +1448,15 @@ export default function ChatApp() {
             <div className="space-y-2 border-t border-dashed border-[#243352] pt-4">
               <h4 className="flex items-center gap-1.5 text-sm font-extrabold text-[#38bdf8]">🔑 اندپوینت‌های API و کلیدها</h4>
               <p className="text-[11px] leading-6 text-slate-500">
-                این سرور هم‌زمان API سازگار با OpenAI و Anthropic ارائه می‌دهد؛ کلیدها در فایل api-keys.json ذخیره شده‌اند.
+                این سرور هم‌زمان API سازگار با OpenAI و Anthropic ارائه می‌دهد.
+                {apiKeys?.exposed === false ? (
+                  <>
+                    {' '}کلیدها در این استقرار مخفی‌اند (<code className="md-icode">EXPOSE_KEYS=false</code>) — مقدار واقعی را
+                    از متغیرهای محیطی سرویس (مثلاً Railway) بخوانید.
+                  </>
+                ) : (
+                  <> کلیدها از <code className="md-icode">api-keys.json</code> یا متغیرهای محیطی خوانده می‌شوند.</>
+                )}
               </p>
               {(['openai', 'anthropic'] as const).map((kind) => (
                 <div
@@ -1466,12 +1474,13 @@ export default function ChatApp() {
                   </code>
                   <button
                     type="button"
+                    disabled={apiKeys?.exposed === false}
                     onClick={async () => {
-                      if (!apiKeys) return;
+                      if (!apiKeys || apiKeys.exposed === false) return;
                       const ok = await copyText(apiKeys[kind]);
                       toast(ok ? 'کلید کپی شد ✓' : 'کپی ناموفق بود', ok ? 'ok' : 'err');
                     }}
-                    className="shrink-0 rounded-lg border border-[#243352] px-2.5 py-1 text-[11px] text-slate-300 hover:border-[#38bdf8] hover:text-[#38bdf8]"
+                    className="shrink-0 rounded-lg border border-[#243352] px-2.5 py-1 text-[11px] text-slate-300 hover:border-[#38bdf8] hover:text-[#38bdf8] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[#243352] disabled:hover:text-slate-300"
                   >
                     کپی
                   </button>

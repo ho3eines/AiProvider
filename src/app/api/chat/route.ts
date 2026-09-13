@@ -60,7 +60,8 @@ export async function POST(req: Request) {
       if (lk === 'transfer-encoding' || lk === 'content-encoding' || lk === 'content-length') continue;
       if (lk === 'connection' || lk === 'keep-alive') continue;
       if (v == null) continue;
-      outHeaders.set(k, Array.isArray(v) ? v.join(', ') : v);
+      // در @types/node جدید، مقدار هدرهای ناشناخته `unknown` است → صریح رشته می‌کنیم
+      outHeaders.set(k, Array.isArray(v) ? v.map(String).join(', ') : String(v));
     }
     outHeaders.set('Cache-Control', 'no-cache, no-transform');
     outHeaders.set('X-Accel-Buffering', 'no');

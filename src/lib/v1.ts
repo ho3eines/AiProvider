@@ -1,7 +1,8 @@
 /**
  * ابزارهای مشترک اندپوینت‌های /v1 (سازگار OpenAI و Anthropic)
  */
-import type { IncomingMessage } from 'node:https';
+// تایپ‌های HTTP از `node:http` می‌آیند (ماژول `node:https` فقط `request`/`Agent` دارد)
+import type { IncomingMessage } from 'node:http';
 
 /** CORS باز شامل هدرهای احراز هویت (برای استفادهٔ خارجی از API) */
 export const V1_CORS: Record<string, string> = {

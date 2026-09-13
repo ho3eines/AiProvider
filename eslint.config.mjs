@@ -19,6 +19,10 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     // React rules
     "react-hooks/exhaustive-deps": "off",
     "react-hooks/purity": "off",
+    // این اپ عمداً در effectِ بعد از mount، localStorage را می‌خواند و state را
+    // ست می‌کند (جلوگیری از hydration mismatch)؛ کامپوننت‌های shadcn هم همین
+    // الگو را دارند. بنابراین این قانون برای این پروژه خاموش است.
+    "react-hooks/set-state-in-effect": "off",
     "react/no-unescaped-entities": "off",
     "react/display-name": "off",
     "react/prop-types": "off",
@@ -27,6 +31,9 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     // Next.js rules
     "@next/next/no-img-element": "off",
     "@next/next/no-html-link-for-pages": "off",
+    // فونت Vazirmatn عمداً با <link> به Google Fonts لود می‌شود (نه next/font)
+    // تا در محیط‌های آفلاین/بدون دسترسی به npm هم UI سالم بماند.
+    "@next/next/no-page-custom-font": "off",
     
     // General JavaScript rules
     "prefer-const": "off",
