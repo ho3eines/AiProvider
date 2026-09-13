@@ -7,12 +7,13 @@
  */
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Activity, Bot, Brain, Check, ChevronDown, Code2, Copy, Download, FileJson, Globe, Languages, Mail, Menu,
-  MessageSquare, Pencil, Plus, RotateCcw, Send, Settings, Sparkles, Square, Trash2, X, Zap,
+  Activity, Bot, Brain, Check, ChevronDown, Code2, Copy, Download, FileJson, FlaskConical, Globe, Languages,
+  Mail, Menu, MessageSquare, Pencil, Plus, RotateCcw, Send, Settings, Sparkles, Square, Trash2, X, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { appendCursor, renderMarkdown, getCodeById } from '@/lib/markdown';
 import { createSseParser } from '@/lib/sse';
+import { CATALOG, DEFAULT_MODEL_ID, type PublicCatalog } from '@/lib/catalog';
 
 /* ---------- انواع داده ---------- */
 type Role = 'user' | 'assistant';
@@ -48,24 +49,24 @@ interface Settings {
 }
 
 /* ---------- ثابت‌ها ---------- */
-/* مدل‌ها با گروه و لوگو — دقیقاً مطابق پیکر مدل سایت freemodels */
-const MODELS = [
-  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
-  { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
-  { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
-  { id: 'gpt-5.6-sol',      name: 'GPT 5.6 Sol',      vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
-  { id: 'gpt-5.6-terra',    name: 'GPT 5.6 Terra',    vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
-  { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI',        group: 'Other Pro Models', logo: '/zai.png' },
-  { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI', group: 'Other Pro Models', logo: '/kimi-logo-png_seeklogo-611650.png' },
-];
-/* گروه‌های پیکر مدل به‌ترتیب نمایش (آیکن هر گروه مثل سایت) */
-const MODEL_GROUPS: Array<{ title: string; icon: LucideIcon }> = [
-  { title: 'Claude Pro',       icon: Sparkles },
-  { title: 'ChatGPT Pro',      icon: Zap },
-  { title: 'Other Pro Models', icon: Globe },
-];
+/* مدل‌ها و گروه‌ها از رجیستری پروایدرها (providers.json) خوانده می‌شوند —
+   منبع واحد، بدون لیست موازی. برای افزودن مدل/پروایدر فقط providers.json را ویرایش کنید.
+   مقدار اولیه از همان JSON بسته‌بندی‌شده است و بعد از mount از `GET /api/models`
+   به‌روز می‌شود (تا hot reload و FM_ENABLE_PROVIDERS در UI هم دیده شود). */
+/* نگاشت نام آیکن گروه (در providers.json) به کامپوننت lucide */
+const GROUP_ICONS: Record<string, LucideIcon> = {
+  sparkles: Sparkles,
+  zap: Zap,
+  globe: Globe,
+  flask: FlaskConical,
+  bot: Bot,
+  brain: Brain,
+};
+/* گروه‌های پیکر مدل به‌ترتیب تعریف در providers.json (آیکن ناشناخته ← Globe) */
+const toGroups = (groups: PublicCatalog['groups']): Array<{ title: string; icon: LucideIcon }> =>
+  (groups || []).map((g) => ({ title: g.title, icon: GROUP_ICONS[g.icon || ''] ?? Globe }));
 const DEFAULT_SETTINGS: Settings = {
-  modelId: 'claude-fable-5.1',
+  modelId: DEFAULT_MODEL_ID,
   thinking: false,
   deepSearch: false,
   stream: true,
@@ -413,6 +414,7 @@ export default function ChatApp() {
   const [rawBytes, setRawBytes] = useState(0);
   const [apiKeys, setApiKeys] = useState<{ openai: string; anthropic: string } | null>(null);
   const [modelPickerOpen, setModelPickerOpen] = useState(false); // پیکر مدل باز است؟
+  const [catalog, setCatalog] = useState<PublicCatalog>(CATALOG); // کاتالوگ زندهٔ مدل‌ها/گروه‌ها
 
   /* ----- refs ----- */
   const chatsRef = useRef<Chat[]>([]);
@@ -440,6 +442,25 @@ export default function ChatApp() {
   rawOpenRef.current = rawOpen;
   settingsOpenRef.current = settingsOpen;
   modelPickerOpenRef.current = modelPickerOpen;
+
+  /* ----- کاتالوگ زندهٔ مدل‌ها از سرور (پروایدرها/گروه‌های جدید بدون rebuild) ----- */
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/models')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (alive && j && Array.isArray(j.models) && j.models.length) setCatalog(j as PublicCatalog);
+      })
+      .catch(() => {
+        /* در دسترس نبود → همان کاتالوگ بسته‌بندی‌شده می‌ماند */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const MODELS = catalog.models;
+  const MODEL_GROUPS = toGroups(catalog.groups);
 
   /* ----- بستن پیکر مدل با کلیک بیرون از آن ----- */
   useEffect(() => {
@@ -1033,7 +1054,7 @@ export default function ChatApp() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[#0b1220] text-slate-200">
       {/* ---------- هدر ---------- */}
-      <header className="z-30 flex shrink-0 flex-wrap items-center gap-2 border-b border-[#243352] bg-[#0d1526]/95 px-3 py-2 backdrop-blur sm:px-4">
+      <header className="z-[55] flex shrink-0 flex-wrap items-center gap-2 border-b border-[#243352] bg-[#0d1526]/95 px-3 py-2 backdrop-blur sm:px-4">
         <button
           aria-label="باز کردن منوی گفتگوها"
           onClick={() => setSidebarOpen(true)}
@@ -1082,7 +1103,7 @@ export default function ChatApp() {
               role="listbox"
               aria-label="مدل‌ها"
               dir="ltr"
-              className="absolute right-0 top-full z-50 mt-2 max-h-[min(55dvh,320px)] w-[264px] overscroll-contain overflow-auto rounded-xl border border-black/10 bg-white p-1.5 shadow-[0_16px_40px_rgba(0,0,0,.35)]"
+              className="absolute right-0 top-full z-[60] mt-2 max-h-[min(55dvh,320px)] w-[264px] overscroll-contain overflow-auto rounded-xl border border-black/10 bg-white p-1.5 shadow-[0_16px_40px_rgba(0,0,0,.35)]"
             >
               {MODEL_GROUPS.map((g) => (
                 <div key={g.title} className="mb-1.5 last:mb-0">

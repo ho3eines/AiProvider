@@ -44,7 +44,9 @@
                                               └──────────────────────────┘
 ```
 
-**لایهٔ انتقال** (`src/lib/upstream.ts` · معادل `openUpstream` در `app.js:2083`) تنها نقطهٔ تماس با دنیای بیرون است. سه ثابت آن قراردادهای سخت‌گیرانه‌ای هستند که نباید بی‌فکر تغییر کنند: `UPSTREAM_URL = https://freemodels-chat.freemodels.workers.dev/`، `MAX_BODY_BYTES = 5MB` (بیشتر ← 413) و `UPSTREAM_TIMEOUT_MS = 180_000` (تایم‌اوت ۱۸۰ ثانیه‌ای که تفکر طولانی مدل‌ها را پوشش دهد).
+**لایهٔ رجیستری** (`src/lib/catalog.ts` + `src/lib/providers.ts` · معادل‌های `getProviders`/`resolveModel`/`buildUpstreamPayload` در `app.js`) تصمیم می‌گیرد درخواست به **کدام** آپستریم، با **کدام** هدرها و در **چه** شکلی برود. منبعش `providers.json` است و در زمان اجرا با hot reload (هر ۱ ثانیه، بر اساس mtime) خوانده می‌شود.
+
+**لایهٔ انتقال** (`src/lib/upstream.ts` · معادل `openUpstream` در `app.js`) تنها نقطهٔ تماس با دنیای بیرون است. url/هدرها/احراز هویت/ضرب‌العجل/سقف بدنه همه از رجیستری می‌آیند؛ برای پروایدر فعلی: `https://freemodels-chat.freemodels.workers.dev/`، `maxBodyBytes = 5MB` (بیشتر ← 413) و `timeoutMs = 180000` (پوشش تفکر طولانی مدل‌ها). ثابت‌های `UPSTREAM_URL`/`MAX_BODY_BYTES`/`UPSTREAM_TIMEOUT_MS`/`SPOOFED_HEADERS` در هر دو نسخه فقط برای سازگاری با کد قدیم نگه داشته شده‌اند و مقدارشان در لحظهٔ بالا آمدن از **پروایدر پیش‌فرضِ رجیستری** گرفته می‌شود؛ هندلرها از توابع زنده استفاده می‌کنند.
 
 **چرا `node:https` و نه `fetch`؟** آپستریم فقط به درخواست‌هایی که از دامنهٔ `freemodels.pro` آمده باشند پاسخ می‌دهد و این را از هدرهای `Origin` و `Referer` تشخیص می‌دهد. مشخصات fetch مرورگر/Node ارسال این دو هدر را ممنوع کرده است، در حالی که `node:https` آزادانه اجازه می‌دهد. مجموعهٔ کامل هدرهای جعل‌شده در `SPOOFED_HEADERS` است: `Origin` و `Referer = https://freemodels.pro`، User-Agent کروم ۱۵۲ روی ویندوز، هدرهای `sec-ch-ua*` و `sec-fetch-*` و نکتهٔ مهم `Accept-Encoding: identity` — این آخری پاسخ فشرده را غیرفعال می‌کند تا استریم بتواند بدون decompress مستقیم pipe شود.
 
@@ -56,29 +58,70 @@
 
 ### 3.1 جدول مدل‌ها
 
-مدل‌ها در یک منبع واحد تعریف می‌شوند — `FM_MODELS` در `src/lib/models.ts` و همان ثابت در `app.js:66` — و UI پیکر مدل، دیتالیست قدیمی و هر سه اندپوینت `/v1` از همین منبع می‌خوانند. هیچ لیست موازی‌ای در هیچ فایل دیگری وجود ندارد و نباید ساخته شود.
+مدل‌ها در یک منبع واحد تعریف می‌شوند — رجیستری `providers.json` (با اسکیمای
+`docs/providers.schema.json`). نسخهٔ Next آن را از طریق `src/lib/catalog.ts`
+(ایزومورفیک: سرور + کلاینت) و `src/lib/providers.ts` (خواندن زنده با hot
+reload) می‌خواند؛ نسخهٔ تک‌فایل همان توابع را در `app.js` دارد و علاوه بر آن
+یک کپی داخلی (`BUILTIN_PROVIDERS`) برای وقتی که فایل JSON در دسترس نباشد.
+`src/lib/models.ts` اکنون فقط یک لایهٔ سازگاری نازک روی `catalog.ts` است.
+UI پیکر مدل و هر چهار اندپوینت (`/api/models`، `/v1/models`،
+`/v1/chat/completions`، `/v1/messages`) همه از همین منبع می‌خوانند — هیچ لیست
+موازی وجود ندارد و `npm run verify` اجازهٔ ساختنش را نمی‌دهد.
 
-| Model ID | نام نمایشی | سازنده | گروه پیکر | نقش پیشنهادی |
-|---|---|---|---|---|
-| `claude-fable-5.1` | Claude Fable 5.1 | Anthropic | Claude Pro | **پیش‌فرض** — تعادل کف کیفیت برای کار عمومی |
-| `claude-sonnet-5` | Claude Sonnet 5 | Anthropic | Claude Pro | کدنویسی و استدلال ساخت‌یافته |
-| `claude-fable-5` | Claude Fable 5 | Anthropic | Claude Pro | نگارش خلاق و روایت |
-| `gpt-5.6-sol` | GPT 5.6 Sol | OpenAI | ChatGPT Pro | پاسخ سریع و محاوره‌ای |
-| `gpt-5.6-terra` | GPT 5.6 Terra | OpenAI | ChatGPT Pro | تحلیل چندمرحله‌ای و داده |
-| `glm-5.2` | GLM 5.2 | Z.AI | Other Pro Models | چندزبانه و کار سبک |
-| `kimi-k3` | Kimi K3 | Moonshot AI | Other Pro Models | متون بلند و جمع‌بندی |
+<!-- GENERATED:models -->
+| Model ID | نام نمایشی | سازنده | گروه | پروایدر | `owned_by` | لوگو |
+|---|---|---|---|---|---|---|
+| `claude-sonnet-5` | Claude Sonnet 5 | Anthropic | Claude Pro | `freemodels` | `freemodels-anthropic` | `/Claude-ai-logo.webp` |
+| `claude-fable-5` | Claude Fable 5 | Anthropic | Claude Pro | `freemodels` | `freemodels-anthropic` | `/Claude-ai-logo.webp` |
+| `claude-fable-5.1` ⭐ **پیش‌فرض** | Claude Fable 5.1 | Anthropic | Claude Pro | `freemodels` | `freemodels-anthropic` | `/Claude-ai-logo.webp` |
+| `gpt-5.6-sol` | GPT 5.6 Sol | OpenAI | ChatGPT Pro | `freemodels` | `freemodels-openai` | `/ChatGPT-Logo.svg.webp` |
+| `gpt-5.6-terra` | GPT 5.6 Terra | OpenAI | ChatGPT Pro | `freemodels` | `freemodels-openai` | `/ChatGPT-Logo.svg.webp` |
+| `glm-5.2` | GLM 5.2 | Z.AI | Other Pro Models | `freemodels` | `freemodels-z.ai` | `/zai.png` |
+| `kimi-k3` | Kimi K3 | Moonshot AI | Other Pro Models | `freemodels` | `freemodels-moonshot-ai` | `/kimi-logo-png_seeklogo-611650.png` |
+<!-- /GENERATED:models -->
 
-### 3.2 نرمال‌سازی نام مدل (resolveModelId)
+گروه‌ها و آیکن‌هایشان هم در رجیستری‌اند (`providers[].groups`)؛ نام‌های آیکن
+مجاز در هر دو نسخه یکسان‌اند: `sparkles`, `zap`, `globe`, `flask`, `bot`,
+`brain`.
 
-تابع `resolveModelId` در `src/lib/models.ts` (معادل `app.js:83`) ورودی را نرم تطبیق می‌دهد: ابتدا trim و lowercase، سپس فاصله‌ها و زیرخط‌ها به خط تیره (`/[\s_]+/ → "-"`)، بعد جست‌وجو در id ها و نام‌های نمایشی. نتیجه: `"Claude Fable 5.1"` و `"claude_fable 5.1"` و `"claude-fable-5.1"` هر سه به `claude-fable-5.1` می‌رسند. ورودی خالی/نال ← مدل پیش‌فرض؛ ورودی ناشناخته دست‌نخورده عبور می‌کند (تصمیم عمدی: کلاینت‌هایی که نام مدل سفارشی می‌فرستند نباید 400 بگیرند — آپستریم خودش واکنش نشان می‌دهد).
+### 3.2 نرمال‌سازی نام مدل و انتخاب پروایدر (resolveModel)
 
-### 3.3 افزودن مدل جدید (Playbook)
+`resolveModel()` در `src/lib/catalog.ts` (معادل `app.js`) ورودی را نرم تطبیق
+می‌دهد: trim و lowercase، تبدیل فاصله/زیرخط به خط‌تیره (`/[\s_]+/ → "-"`)،
+سپس جست‌وجو در `id`ها، نام‌های نمایشی و `aliases`. خروجی یک آبجکت است:
+`{ id, publicId, model, provider, known }` — یعنی **پروایدر هم از روی مدل
+انتخاب می‌شود**، نه از روی یک ثابت سراسری.
 
-1. **منبع واحد:** رکورد `{ id, name, vendor, group }` را در `src/lib/models.ts` اضافه کنید و **دقیقاً همان رکورد** را در `FM_MODELS` داخل `app.js:66` کپی کنید. گروه باید یکی از سه گروه فعلی باشد یا در هر دو نسخه گروه جدید تعریف شود.
-2. **لوگو (اختیاری):** فایل لوگو را در `public/` بگذارید (Next خودکار می‌بیند) و برای app.js با `scripts/embed_logos.py` به‌صورت base64 در `EMBEDDED_LOGOS` (`app.js:79`) تزریق کنید — مسیر فایل باید در هر دو نسخه یکسان بماند (`/vendor-logo.webp`).
-3. **پیکر گروهی:** اگر گروه جدید است، آیکن و برچسب گروه را در `page.tsx` (آرایهٔ گروه‌ها با آیکن‌های lucide) و معادل `buildPicker` در `PAGE_JS` app.js اضافه کنید.
-4. **صحت‌سنجی:** `GET /v1/models` باید مدل جدید را با `owned_by=freemodels-<vendor>` برگرداند؛ با نام نمایشی و با id هر دو باید بتوان چت کرد؛ `bun run lint` و `node --check app.js` هر دو سبز.
-5. **مستندسازی:** ردیف جدول بالا و جدول مدل‌های `README.md` را به‌روز کنید — سندها جزو تعریف مدل‌اند، نه ضمیمه.
+- ورودی خالی/نال ← مدل پیش‌فرض رجیستری.
+- ورودی ناشناخته ← `known:false` با **پروایدر پیش‌فرض** و همان id نرمال‌شده
+  (تصمیم عمدی: کلاینتی که نام سفارشی می‌فرستد نباید 400 بگیرد).
+- اگر آپستریم مدل را با نام دیگری می‌شناسد، `upstreamId` در رجیستری تعیین
+  می‌کند چه چیزی روی سیم برود؛ `publicId` همان چیزی است که در پاسخ API و UI
+  دیده می‌شود.
+
+`resolveModelId()` هم برای سازگاری با کد قدیم باقی است (فقط id عمومی).
+
+### 3.3 افزودن مدل یا پروایدر جدید (Playbook)
+
+هر دو کار **فقط با ویرایش `providers.json`** انجام می‌شوند — بدون کد:
+
+1. **مدل جدید:** یک رکورد `{ id, name, vendor, group, logo }` به
+   `providers[i].models` اضافه کنید (فیلدهای اختیاری: `upstreamId`, `aliases`,
+   `default`). گروه تازه باید در `providers[i].groups` هم تعریف شود.
+2. **پروایدر/سایت جدید:** یک رکورد کامل با `upstream` (url/headers/auth)،
+   `request` (shape/fields/constants)، `response`، `groups` و `models` اضافه
+   کنید. احراز هویت را با `${ENV_VAR}` بخوانید، نه مقدار لفظی.
+3. **همگام‌سازی نسخهٔ تک‌فایل:** `npm run sync:builtin` (کپی
+   `BUILTIN_PROVIDERS` را از روی JSON بازسازی می‌کند + `node --check`).
+4. **لوگو (اختیاری):** فایل در `public/` و سپس `npm run embed:logos` برای
+   نسخهٔ تک‌فایل.
+5. **صحت‌سنجی:** `npm run verify` و `npm run smoke`؛ بعد `GET /api/models` و
+   `GET /v1/models` را چک کنید (و در UI صفحه را refresh کنید).
+6. **مستندسازی:** `npm run docs:sync` — جدول‌های مدل/پروایدر/گروه در
+   `README.md` و همین سند خودکار تازه می‌شوند.
+
+جزئیات گام‌به‌گام، الگوهای آماده و دام‌ها: `skills/add-model/SKILL.md` و
+`skills/add-provider/SKILL.md`.
 
 ---
 
@@ -86,7 +129,7 @@
 
 ### 4.1 چرا پارسر «جهانی»؟
 
-آپستریم رایگان است و هیچ SLA فرمت ندارد؛ در عمل سبک غالبش OpenAI است اما بسته به مدل، فیلدها متفاوت می‌آیند. به همین دلیل `createSseParser` در `src/lib/sse.ts` طراحی شده که «هر شکلی که آپستریم بگوید» را به یک قرارداد داخلی ساده تبدیل کند: رویداد `{ text, reasoning, error? }`. همهٔ مصرف‌کننده‌ها (UI چت، اندپوینت OpenAI، اندپوینت Anthropic) فقط این قرارداد را می‌بینند و از جزئیات آپستریم بی‌خبرند. اگر روزی آپستریم فرمتش را عوض کند، **اولین و معمولاً تنها جای تغییر همین فایل است** (معادل سرور در app.js: `makeUpstreamParser` خط 2399).
+آپستریم رایگان است و هیچ SLA فرمت ندارد؛ در عمل سبک غالبش OpenAI است اما بسته به مدل، فیلدها متفاوت می‌آیند. به همین دلیل `createSseParser` در `src/lib/sse.ts` طراحی شده که «هر شکلی که آپستریم بگوید» را به یک قرارداد داخلی ساده تبدیل کند: رویداد `{ text, reasoning, error? }`. همهٔ مصرف‌کننده‌ها (UI چت، اندپوینت OpenAI، اندپوینت Anthropic) فقط این قرارداد را می‌بینند و از جزئیات آپستریم بی‌خبرند. اگر روزی آپستریم فرمتش را عوض کند، **اولین و معمولاً تنها جای تغییر همین فایل است** (معادل سرور در app.js: `makeUpstreamParser`).
 
 ### 4.2 فرمت‌های پشتیبانی‌شده
 
@@ -117,7 +160,7 @@ Authorization: Bearer <key>
 
 ### 5.2 GET /v1/models
 
-لیست استاندارد OpenAI با ۷ مدل و `owned_by=freemodels-anthropic|openai|z.ai|moonshot-ai`. بدون کلید ← 401. نمونه:
+لیست استاندارد OpenAI از روی رجیستری؛ `owned_by` = `<ownedByPrefix>-<vendor-slug>` (مثلاً `freemodels-anthropic`). فیلدهای غیراستاندارد (`group`/`vendor`/`logo`/`provider`) عمداً در حالت عادی برنمی‌گردند تا سازگاری OpenAI حفظ شود؛ با `?extra=1` اضافه می‌شوند. بدون کلید ← 401. نمونه:
 
 ```bash
 curl -s http://localhost:3000/v1/models \
@@ -217,11 +260,13 @@ POST /api/chat  {messages:[{role,content}], modelId, thinking, deepSearch, strea
   ← استریم SSE سبک OpenAI آپستریم (delta.content + delta.reasoning_content) یا JSON کامل
   ← خطا: {error:{message}} با 413/502/504 یا عبور کد آپستریم (مثلاً 429)
 
-GET /api/ping → {status:"ok"|"error", ms:number, sample:string(≤200)}
-GET /api/keys → {openai, anthropic}   (فقط Next؛ app.js با window.__FM__ تزریق می‌کند)
+GET /api/models → {models:[{id,name,vendor,group,logo,providerId}], groups:[{title,icon}], defaultModel}
+                  (کاتالوگ عمومی برای UI — بدون نشت url/هدر/auth آپستریم)
+GET /api/ping?model=<id> → {status:"ok"|"error", ms, sample(≤200), provider, model}
+GET /api/keys → {openai, anthropic}   (در app.js همین داده در window.__FM__ هم تزریق می‌شود)
 ```
 
-تفاوت مهم `/api/chat` با `/v1/*` این است که اینجا **پروکسی خام** هستیم: پاسخ آپستریم بدون تبدیل فرمت pipe می‌شود و پارس/نمایش در کلاینت انجام می‌گیرد (پارسر SSE همان منطق، سمت مرورگر). نام مدل هم اینجا با همان `resolveModelId` نرمال می‌شود. `/api/ping` برای دکمهٔ «اتصال؟» است: یک درخواست سبک `stream:false` با پیام ping می‌فرستد و تأخیر واقعی آپستریم را گزارش می‌کند — ۲ تا ۳ ثانیه پاسخ طبیعی است.
+تفاوت مهم `/api/chat` با `/v1/*` این است که اینجا **پروکسی خام** هستیم: پاسخ آپستریم بدون تبدیل فرمت pipe می‌شود و پارس/نمایش در کلاینت انجام می‌گیرد (پارسر SSE همان منطق، سمت مرورگر). نام مدل هم اینجا با همان `resolveModel` نرمال می‌شود (و پروایدر از رویش انتخاب می‌شود). `/api/ping` برای دکمهٔ «اتصال؟» است: یک درخواست سبک `stream:false` با پیام ping می‌فرستد و تأخیر واقعی آپستریم را گزارش می‌کند — ۲ تا ۳ ثانیه پاسخ طبیعی است.
 
 ---
 
@@ -262,11 +307,13 @@ GET /api/keys → {openai, anthropic}   (فقط Next؛ app.js با window.__FM__
 
 ### 10.1 افزودن فیلد اکستنشن جدید (مثل thinking/deep_search)
 
-مسیر استاندارد در سه ایستگاه: (۱) در route مربوطه بخوانید و به payload آپستریم اضافه کنید (`parsed.my_field === true`)؛ (۲) همان فیلد را در payload builder داخل app.js اضافه کنید؛ (۳) اگر UI دارد، چک‌باکس را در هر دو فرانت اضافه کنید. نام فیلد در `/v1/chat/completions` از قاعدهٔ snake_case پیروی می‌کند (مثل `deep_search`) و در payload داخلی camelCase می‌شود (`deepSearch`) — این نگاشت عمدی است تا با استاندارد OpenAI سازگار بمانیم.
+اگر فیلد شما فقط **نگاشتِ نام** است (یعنی آپستریم همان مفهوم را با نام دیگری می‌خواهد)، هیچ کدی لازم نیست: در رجیستری `request.fields` همان پروایدر یک کلید مجاز (`model`/`messages`/`stream`/`thinking`/`deepSearch`/`maxTokens`/`system`) را به نام فیلد آپستریم نگاشت کنید، یا اگر مقدار ثابت است در `request.constants` بگذارید.
+
+اگر واقعاً فیلد تازه‌ای به قرارداد داخلی اضافه می‌شود، مسیر استاندارد سه ایستگاه است: (۱) در route مربوطه بخوانید و به `buildUpstreamPayload` بدهید (`parsed.my_field === true`)؛ (۲) همان فیلد را در `NormalChatRequest` (`src/lib/catalog.ts`) و تابع `buildUpstreamPayload` هر دو نسخه اضافه کنید؛ (۳) اگر UI دارد، چک‌باکس را در هر دو فرانت اضافه کنید. نام فیلد در `/v1/chat/completions` از قاعدهٔ snake_case پیروی می‌کند (مثل `deep_search`) و در payload داخلی camelCase می‌شود (`deepSearch`) — این نگاشت عمدی است تا با استاندارد OpenAI سازگار بمانیم.
 
 ### 10.2 تغییر یا تعویض آپستریم
 
-اگر freemodels از دسترس خارج شد یا آدرس عوض شد: `UPSTREAM_URL` در `src/lib/upstream.ts` و ثابت هم‌نام در app.js (بالای `openUpstream`) را هم‌زمان عوض کنید؛ هدرهای `SPOOFED_HEADERS` را با دامنهٔ جدید هماهنگ کنید؛ و اگر فرمت پاسخ عوض شد، طبق بخش ۴ اول `src/lib/sse.ts` و معادل `makeUpstreamParser` را اصلاح کنید — بقیهٔ سیستم نباید متوجه شود.
+اگر freemodels از دسترس خارج شد یا آدرس عوض شد، **فقط `providers.json` را ویرایش کنید**: `providers[i].upstream.url` و `headers` (Origin/Referer/UA متناسب با دامنهٔ جدید) و در صورت نیاز `timeoutMs`. سپس `npm run sync:builtin` — hot reload باعث می‌شود حتی restart لازم نباشد. می‌توانید به‌جای تعویض، یک پروایدر دوم اضافه کنید تا هر دو موازی فعال بمانند (پروایدر از روی مدل انتخاب می‌شود). اگر فرمت پاسخ عوض شد، اول `response.textFields`/`reasoningFields`/`doneToken` همان پروایدر را تنظیم کنید؛ تنها وقتی که اینها کافی نبود طبق بخش ۴ به `src/lib/sse.ts` و معادل `makeUpstreamParser` دست بزنید — بقیهٔ سیستم نباید متوجه شود. جزئیات: `skills/add-provider/SKILL.md`.
 
 ### 10.3 آزمون سریع لایهٔ AI (شش curl)
 
@@ -291,20 +338,25 @@ curl -s $B/v1/messages -H "x-api-key: $A" -H "Content-Type: application/json" \
 
 ## 11. AI Layer Roadmap | نقشهٔ راه لایهٔ هوش مصنوعی
 
-اولویت‌بندی پیشنهادی بر اساس ارزش/هزینه: (۱) **Retry خودکار با backoff برای 429** در `openUpstream` — یک retry با تأخیر ۲–۵ ثانیه بیشترین بهبود تجربه را با کمترین ریسک می‌دهد. (۲) **فیلدهای اختیاری `group`/`vendor` در پاسخ `/v1/models`** — سازگار با OpenAI می‌ماند چون فیلد اضافه است و پیکرهای سرویس‌های بالادستی می‌توانند گروه‌بندی کنند. (۳) **شمارش توکن واقعی‌تر** (تیکر تنهایی به‌جای نویسه/۴) برای usage. (۴) **Rate limit و audit log سمت خودمان** اگر پروژه عمومی شود. (۵) **پشتیبانی ورودی تصویر/فایل** در صورت باز شدن آن در آپستریم. هر آیتم باید طبق Playbook بخش ۱۰ در هر دو نسخه هم‌زمان پیاده و با شش curl تأیید شود و ردیفی در `worklog.md` بگیرد.
+اولویت‌بندی پیشنهادی بر اساس ارزش/هزینه: (۱) **Retry خودکار با backoff برای 429** در `openUpstream` — یک retry با تأخیر ۲–۵ ثانیه بیشترین بهبود تجربه را با کمترین ریسک می‌دهد. (۲) ~~فیلدهای اختیاری `group`/`vendor` در پاسخ `/v1/models`~~ — **انجام شد**: با `?extra=1` فیلدهای `group`/`vendor`/`logo`/`provider` برمی‌گردند و حالت عادی استاندارد می‌ماند. جایگزین پیشنهادی: **fallback زنجیره‌ای پروایدرها** هنگام 429/5xx (رجیستری اکنون چندپروایدری است). (۳) **شمارش توکن واقعی‌تر** (تیکر تنهایی به‌جای نویسه/۴) برای usage. (۴) **Rate limit و audit log سمت خودمان** اگر پروژه عمومی شود. (۵) **پشتیبانی ورودی تصویر/فایل** در صورت باز شدن آن در آپستریم. هر آیتم باید طبق Playbook بخش ۱۰ در هر دو نسخه هم‌زمان پیاده و با شش curl تأیید شود و ردیفی در `worklog.md` بگیرد.
 
 ### 11.1 مرجع سریع فایل‌های لایهٔ AI
 
+شمارهٔ خط نگذارید (جابه‌جا می‌شود)؛ با `grep -n "^function <name>" app.js`
+پیدایش کنید.
+
 | نقش | نسخهٔ Next.js | معادل در app.js |
 |---|---|---|
-| کاتالوگ مدل‌ها + نرمال‌سازی | `src/lib/models.ts` | `FM_MODELS` (خط ۶۶) · `resolveModelId` (۸۳) |
-| انتقال آپستریم + هدرهای جعلی | `src/lib/upstream.ts` | `openUpstream` (۲۰۸۳) |
-| پارسر جهانی SSE | `src/lib/sse.ts` | `makeUpstreamParser` (۲۳۹۹) · `collectUpstreamText` (۲۵۲۰) |
-| ابزار مشترک /v1 (CORS، SSE، flatten، usage) | `src/lib/v1.ts` | توابع خطی کنار هندلرها (`flattenContent` ۲۳۷۲) |
-| کلیدها | `src/lib/apikeys.ts` | `loadOrCreateKeys` + `getBearerToken` (۲۳۴۷) |
-| اندپوینت OpenAI | `src/app/v1/chat/completions/route.ts` + `v1/models/route.ts` | هندلرهای `/v1/chat/completions` و `/v1/models` |
-| اندپوینت Anthropic | `src/app/v1/messages/route.ts` | هندلر `/v1/messages` + `anthropicError` (۲۳۶۷) |
-| پروکسی داخلی چت | `src/app/api/chat/route.ts` + `api/ping` + `api/keys` | هندلرهای `/api/chat` و `/api/ping` (+ `window.__FM__`) |
+| رجیستری + کاتالوگ + نرمال‌سازی + ساخت بدنه | `src/lib/catalog.ts` | `BUILTIN_PROVIDERS`, `getProviders`, `resolveModel`, `buildUpstreamPayload`, `publicCatalog` |
+| خواندن زندهٔ رجیستری (hot reload + env toggles) | `src/lib/providers.ts` | `readProvidersConfig`, `withEnvToggles`, `PROVIDERS_RELOAD_MS` |
+| سازگاری قدیم (`FM_MODELS`, `resolveModelId`) | `src/lib/models.ts` | `FM_MODELS`, `DEFAULT_MODEL_ID`, `resolveModelId` |
+| انتقال آپستریم + هدرها + CORS | `src/lib/upstream.ts` | `openUpstream`, `upstreamOptions`, `OPEN_CORS`, `logReq` |
+| پارسر جهانی SSE | `src/lib/sse.ts` | `makeUpstreamParser`, `readStreamText` |
+| ابزار مشترک /v1 (CORS، SSE، flatten، usage) | `src/lib/v1.ts` | `getBearerToken`, `openaiError`, `anthropicError`, `flattenContent`, `estTokens` |
+| کلیدها | `src/lib/apikeys.ts` | `loadOrCreateKeys`, `API_KEYS`, `keyIsValid` |
+| اندپوینت OpenAI | `src/app/v1/chat/completions/route.ts` + `src/app/v1/models/route.ts` | `handleOpenAI`, `handleModels` |
+| اندپوینت Anthropic | `src/app/v1/messages/route.ts` | `handleAnthropic` |
+| پروکسی داخلی چت + کاتالوگ + کلیدها + ping | `src/app/api/{chat,models,keys,ping}/route.ts` | `handleChat`, `handleCatalog`, `handleKeys`, `handlePing` (+ تزریق `window.__FM__`) |
 
 ### 11.2 هم‌بستهٔ سندهای پروژه
 
@@ -313,4 +365,6 @@ curl -s $B/v1/messages -H "x-api-key: $A" -H "Content-Type: application/json" \
 | `README.md` | داکیومنت کامل پروژه: معماری، نصب و اجرا، مرجع API مقدماتی، تاریخچه و نقشهٔ راه کلی | MD + PDF |
 | `HANDOFF.md` | سند تحویل: TL;DR سه‌دستوری، ۱۰ نکتهٔ بحرانی، قرارداد فرانت-بک، چک‌لیست صحت‌سنجی | MD + PDF |
 | `AI-GUIDE.md` (همین سند) | مرجع لایهٔ AI: مدل‌ها، آپستریم، SSE، اندپوینت‌های /v1، کلیدها، خطاها، Playbook | MD + PDF |
+| `skills/*/SKILL.md` | دفترچهٔ عملیات تغییرات: افزودن مدل/پروایدر/قابلیت، ویرایش `app.js`، دیباگ استریم، به‌روزرسانی اسناد | MD |
+| `docs/providers.schema.json` | اسکیمای رجیستری (اعتبارسنجی و راهنما در ویرایشگر) | JSON Schema |
 | `worklog.md` | گزارش خام تسک‌ها با جزئیات تست و تصمیم‌ها — منبع تاریخچه | MD |

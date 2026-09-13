@@ -1,30 +1,21 @@
 /**
- * مدل‌های سرویس freemodels (طبق سایت) + تطبیق نرم نام مدل
- * این لیست هم در UI (datalist) و هم در اندپوینت‌های /v1 استفاده می‌شود.
+ * لایهٔ سازگاری با کد قبلی — منبع حقیقتِ مدل‌ها اکنون `providers.json` است.
+ *
+ * این فایل فقط re-export است تا import های قدیمی (`@/lib/models`) کار کنند.
+ * برای کار جدید از این‌ها استفاده کنید:
+ *  • سرور (با hot reload):   `@/lib/providers`  → getProvidersConfig()
+ *  • کلاینت/مشترک (استاتیک): `@/lib/catalog`    → listModels(), resolveModel(), publicCatalog()
  */
-export interface FmModel {
-  id: string;
-  name: string;
-  vendor: string;
-  group: 'Claude Pro' | 'ChatGPT Pro' | 'Other Pro Models';
-}
+import { RAW_CONFIG, defaultModelId, listModels, resolveModelId } from './catalog';
+import type { CatalogModel } from './catalog';
 
-export const FM_MODELS: FmModel[] = [
-  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic',   group: 'Claude Pro' },
-  { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic',   group: 'Claude Pro' },
-  { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic',   group: 'Claude Pro' },
-  { id: 'gpt-5.6-sol',      name: 'GPT 5.6 Sol',      vendor: 'OpenAI',      group: 'ChatGPT Pro' },
-  { id: 'gpt-5.6-terra',    name: 'GPT 5.6 Terra',    vendor: 'OpenAI',      group: 'ChatGPT Pro' },
-  { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI',        group: 'Other Pro Models' },
-  { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI', group: 'Other Pro Models' },
-];
+export type FmModel = CatalogModel;
 
-export const DEFAULT_MODEL_ID = 'claude-fable-5.1'; // مدل پیش‌فرض (انتخاب‌شده در سایت)
+export const FM_MODELS: CatalogModel[] = listModels(RAW_CONFIG);
 
-/** تطبیق نرم نام مدل: «Claude Fable 5.1» یا «claude_fable 5.1» هم پذیرفته می‌شود */
-export function resolveModelId(input?: string | null): string {
-  if (!input || typeof input !== 'string') return DEFAULT_MODEL_ID;
-  const t = input.trim().toLowerCase().replace(/[\s_]+/g, '-');
-  const hit = FM_MODELS.find((m) => m.id === t || m.name.toLowerCase() === input.trim().toLowerCase());
-  return hit ? hit.id : t || DEFAULT_MODEL_ID;
-}
+export const DEFAULT_MODEL_ID: string = defaultModelId(RAW_CONFIG);
+
+export { resolveModelId };
+
+/** همهٔ مدل‌های کاتالوگ (با اطلاعات پروایدر) — از پیکربندی داده‌شده */
+export const allModels = listModels;

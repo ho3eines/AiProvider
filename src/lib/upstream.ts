@@ -1,31 +1,38 @@
 /**
- * تنظیمات و ابزار ارتباط با API آپستریم (freemodels)
- * هدرهای مرورگر جعل می‌شوند تا CORS آپستریم (که فقط freemodels.pro را باز گذاشته) دور زده شود.
+ * لایهٔ انتقال به آپستریم — تنها نقطهٔ تماس با دنیای بیرون
+ *
+ * • هدرهای مرورگر جعل می‌شود تا CORS آپستریم (که فقط freemodels.pro را باز گذاشته) دور زده شود.
+ * • از `node:https`/`node:http` استفاده می‌شود، نه `fetch` — چون fetch ارسال دستی
+ *   `Origin`/`Referer` را ممنوع می‌کند و آپستریم بدون آن‌ها پاسخ نمی‌دهد.
+ * • URL/هدرها/تایم‌اوت از `providers.json` (رجیستری پروایدرها) خوانده می‌شود، پس
+ *   برای اتصال به سایت جدید هیچ تغییری در این فایل لازم نیست (skills/add-provider).
  */
-import { request as httpsRequest, type ClientRequest, type IncomingHttpHeaders, type IncomingMessage } from 'node:https';
+import { request as httpRequest } from 'node:http';
+import type { ClientRequest, IncomingHttpHeaders, IncomingMessage } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import {
+  DEFAULT_MAX_BODY_BYTES,
+  DEFAULT_TIMEOUT_MS,
+  defaultProvider,
+  upstreamOptions,
+  type Provider,
+  type ProvidersConfig,
+} from './catalog';
 
-export const UPSTREAM_URL = 'https://freemodels-chat.freemodels.workers.dev/';
-export const MAX_BODY_BYTES = 5 * 1024 * 1024; // حداکثر حجم بدنه درخواست: ۵ مگابایت
-export const UPSTREAM_TIMEOUT_MS = 180_000; // تایم‌اوت آپستریم: ۱۸۰ ثانیه
+export { DEFAULT_MAX_BODY_BYTES as MAX_BODY_BYTES_DEFAULT, DEFAULT_TIMEOUT_MS as UPSTREAM_TIMEOUT_MS_DEFAULT };
 
-/** هدرهایی که به‌جای مرورگر به آپستریم فرستاده می‌شود */
-export const SPOOFED_HEADERS: Record<string, string> = {
-  'Content-Type': 'application/json',
-  'Origin': 'https://freemodels.pro',
-  'Referer': 'https://freemodels.pro/',
-  'Accept': '*/*',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
-  'sec-ch-ua': '"Chromium";v="152", "Not?A_Brand";v="24"',
-  'sec-ch-ua-mobile': '?0',
-  'sec-ch-ua-platform': '"Windows"',
-  'sec-fetch-dest': 'empty',
-  'sec-fetch-mode': 'cors',
-  'sec-fetch-site': 'cross-site',
-  // جلوگیری از پاسخ فشرده تا pipe مستقیم بدون نیاز به decompress باشد
-  'Accept-Encoding': 'identity',
-};
+/* ───────── مقادیر سازگار با کد قبلی (از پروایدر پیش‌فرض providers.json) ───────── */
+
+const boot = upstreamOptions(defaultProvider());
+
+/** URL آپستریمِ پروایدر پیش‌فرض */
+export const UPSTREAM_URL = boot.url;
+/** هدرهای جعل‌شدهٔ پروایدر پیش‌فرض */
+export const SPOOFED_HEADERS: Record<string, string> = boot.headers;
+/** حداکثر حجم بدنهٔ درخواست (پیش‌فرض ۵ مگابایت) */
+export const MAX_BODY_BYTES = boot.maxBodyBytes || DEFAULT_MAX_BODY_BYTES;
+/** تایم‌اوت آپستریم (پیش‌فرض ۱۸۰ ثانیه) */
+export const UPSTREAM_TIMEOUT_MS = boot.timeoutMs || DEFAULT_TIMEOUT_MS;
 
 /** خطای اختصاصی آپستریم */
 export class UpstreamError extends Error {
@@ -41,27 +48,85 @@ export interface UpstreamResponse {
   headers: IncomingHttpHeaders;
   res: IncomingMessage;
   req: ClientRequest;
+  /** پروایدری که درخواست با آن ارسال شد */
+  providerId: string;
+}
+
+export interface OpenUpstreamOptions {
+  /** بدنهٔ JSON (رشته) */
+  body: string;
+  /** تایم‌اوت — پیش‌فرض از همان پروایدر */
+  timeoutMs?: number;
+  /** پیکربندی پروایدر — پیش‌فرض: پروایدر پیش‌فرض سیستم */
+  provider?: Provider;
+  /** برای دیباگ: نام مسیر لاگ‌شونده */
+  label?: string;
+  cfg?: ProvidersConfig;
 }
 
 /**
- * باز کردن درخواست POST به آپستریم؛ همان لحظه‌ای که هدرهای پاسخ رسید resolve می‌شود
- * تا body/استریم توسط caller به‌صورت تدریجی pipe شود.
+ * باز کردن درخواست به آپستریم؛ همان لحظه‌ای که هدرهای پاسخ رسید resolve می‌شود
+ * تا body/استریم توسط caller به‌صورت تدریجی pipe شود (بدون بافر تجمعی).
  */
-export function openUpstream(body: string, timeoutMs = UPSTREAM_TIMEOUT_MS): Promise<UpstreamResponse> {
+export function openUpstreamRequest(opts: OpenUpstreamOptions): Promise<UpstreamResponse> {
+  const provider = opts.provider || defaultProvider(opts.cfg);
+  const up = upstreamOptions(provider, opts.cfg);
+  const timeoutMs = opts.timeoutMs ?? up.timeoutMs;
+  const label = opts.label || 'upstream';
+
   return new Promise((resolve, reject) => {
-    const req = httpsRequest(
-      UPSTREAM_URL,
+    if (!up.url) {
+      reject(new UpstreamError('UPSTREAM_CONFIG', `پروایدر «${provider?.id}» آدرس آپستریم ندارد (providers.json).`));
+      return;
+    }
+    if (up.missingEnv.length) {
+      console.warn(`[upstream] ${label}: متغیرهای محیطیِ تعریف‌نشده → ${up.missingEnv.join(', ')}`);
+    }
+
+    const isHttps = /^https:/i.test(up.url);
+    const doRequest = isHttps ? httpsRequest : httpRequest;
+    const req = doRequest(
+      up.url,
       {
-        method: 'POST',
-        headers: { ...SPOOFED_HEADERS, 'Content-Length': String(Buffer.byteLength(body, 'utf8')) },
+        method: up.method || 'POST',
+        headers: { ...up.headers, 'Content-Length': String(Buffer.byteLength(opts.body, 'utf8')) },
       },
-      (res) => resolve({ status: res.statusCode || 502, headers: res.headers, res, req })
+      (res) => resolve({ status: res.statusCode || 502, headers: res.headers, res, req, providerId: provider.id })
     );
-    req.setTimeout(timeoutMs, () => req.destroy(new UpstreamError('UPSTREAM_TIMEOUT', 'پاسخ آپستریم بیش از حد طول کشید (۱۸۰ ثانیه)')));
-    req.on('error', (err) => reject(new UpstreamError('UPSTREAM_ERROR', err.message || 'خطای اتصال به آپستریم')));
-    req.write(body, 'utf8');
+
+    req.setTimeout(timeoutMs, () =>
+      req.destroy(
+        new UpstreamError('UPSTREAM_TIMEOUT', `پاسخ آپستریم بیش از حد طول کشید (${Math.round(timeoutMs / 1000)} ثانیه)`)
+      )
+    );
+    req.on('error', (err) => {
+      const e = err as Error & { code?: string };
+      if (e instanceof UpstreamError || e.code === 'UPSTREAM_TIMEOUT') reject(e);
+      else reject(new UpstreamError('UPSTREAM_ERROR', e.message || 'خطای اتصال به آپستریم'));
+    });
+    req.write(opts.body, 'utf8');
     req.end();
   });
+}
+
+/**
+ * امضای سازگار با کد قبلی: `openUpstream(body, timeoutMs?)`.
+ * اگر `provider` داده شود (یا `body` آبجکت گزینه‌ها باشد) از همان پروایدر استفاده می‌شود.
+ */
+export function openUpstream(
+  body: string,
+  timeoutOrOpts?: number | Omit<OpenUpstreamOptions, 'body'>,
+  provider?: Provider
+): Promise<UpstreamResponse> {
+  if (typeof timeoutOrOpts === 'object' && timeoutOrOpts !== null) {
+    return openUpstreamRequest({ ...timeoutOrOpts, body });
+  }
+  return openUpstreamRequest({ body, timeoutMs: timeoutOrOpts, provider });
+}
+
+/** میان‌بر: باز کردن درخواست برای یک پروایدر مشخص */
+export function openUpstreamFor(provider: Provider, body: string, timeoutMs?: number): Promise<UpstreamResponse> {
+  return openUpstreamRequest({ provider, body, timeoutMs });
 }
 
 /* ---------- لاگ رنگی کنسول ---------- */

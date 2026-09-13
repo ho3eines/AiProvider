@@ -50,5 +50,11 @@ test
 prompt
 
 server.log
-# Skills directory
-/skills/
+# مهارت‌های پروژه (skills/*/SKILL.md) بخشی از ریپو هستند و track می‌شوند.
+# فقط خروجی موقت ابزارها نادیده گرفته می‌شود:
+.tmp/
+scripts/.tmp/
+.tmp-pagejs-check.cjs
+
+# قفلِ رسمی ریپو bun.lock است؛ lockfile تولیدشدهٔ npm را commit نکنید
+package-lock.json

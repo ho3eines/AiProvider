@@ -21,13 +21,25 @@ export interface SseParser {
   end(): void;
 }
 
-interface EmitOptions {
+export interface EmitOptions {
   onEvent: (ev: SseEvent) => void;
+  /**
+   * نام فیلدهای متنیِ اضافیِ مخصوص یک آپستریم (از providers.json → response.textFields).
+   * روی ریشهٔ آبجکت، `delta`، `message` و `choices[0].delta/message` جست‌وجو می‌شوند.
+   */
+  extraTextFields?: string[];
+  /** نام فیلدهای «تفکر» اضافی (از response.reasoningFields) */
+  extraReasoningFields?: string[];
+  /** نشانهٔ پایان استریم — پیش‌فرض `[DONE]` */
+  doneToken?: string;
 }
 
 export function createSseParser(opts: EmitOptions): SseParser {
   let buf = ''; // بافر خطوط ناقص
   let pendingJson = ''; // JSON چندخطیِ ناقص
+  const extraText = (opts.extraTextFields || []).filter((f) => typeof f === 'string' && f);
+  const extraReason = (opts.extraReasoningFields || []).filter((f) => typeof f === 'string' && f);
+  const doneToken = opts.doneToken || '[DONE]';
 
   const emit = (text = '', reasoning = '', error?: string) => {
     if (text || reasoning || error) opts.onEvent({ text, reasoning, error });
@@ -105,6 +117,24 @@ export function createSseParser(opts: EmitOptions): SseParser {
     addReason(o.reasoning, out);
     addReason(o.thinking, out);
 
+    // --- فیلدهای سفارشیِ همان پروایدر (providers.json → response.textFields/reasoningFields) ---
+    if (extraText.length || extraReason.length) {
+      const scopes: Array<Record<string, any>> = [o];
+      if (topDelta && typeof topDelta === 'object') scopes.push(topDelta as Record<string, any>);
+      if (topMessage && typeof topMessage === 'object') scopes.push(topMessage as Record<string, any>);
+      if (choice && typeof choice === 'object') {
+        scopes.push(choice as Record<string, any>);
+        const cd = (choice as Record<string, any>).delta;
+        const cm = (choice as Record<string, any>).message;
+        if (cd && typeof cd === 'object') scopes.push(cd);
+        if (cm && typeof cm === 'object') scopes.push(cm);
+      }
+      for (const s of scopes) {
+        for (const f of extraText) addText(s?.[f], out);
+        for (const f of extraReason) addReason(s?.[f], out);
+      }
+    }
+
     // --- خطای داخل استریم ---
     if (o.error) {
       error =
@@ -122,7 +152,7 @@ export function createSseParser(opts: EmitOptions): SseParser {
   function handlePayload(payload: string): void {
     const t = payload.trim();
     if (!t) return;
-    if (t === '[DONE]') return; // پایان استریم
+    if (t === doneToken || t === '[DONE]') return; // پایان استریم
     if (t.startsWith('{') || t.startsWith('[')) {
       // JSON ممکن است چندخطی باشد؛ تا کامل شدن نگه می‌داریم
       pendingJson = pendingJson ? pendingJson + '\n' + payload : payload;

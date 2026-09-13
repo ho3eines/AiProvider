@@ -1,7 +1,7 @@
 /**
  * ابزارهای مشترک اندپوینت‌های /v1 (سازگار OpenAI و Anthropic)
  */
-import type { IncomingMessage } from 'node:https';
+import type { IncomingMessage } from 'node:http';
 
 /** CORS باز شامل هدرهای احراز هویت (برای استفادهٔ خارجی از API) */
 export const V1_CORS: Record<string, string> = {

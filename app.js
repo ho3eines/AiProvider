@@ -31,28 +31,40 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-/* ---------- ثابت‌های آپستریم (پورت از src/lib/upstream.ts) ---------- */
-const UPSTREAM_URL = 'https://freemodels-chat.freemodels.workers.dev/';
-const MAX_BODY_BYTES = 5 * 1024 * 1024; // حداکثر حجم بدنهٔ درخواست: ۵ مگابایت
-const UPSTREAM_TIMEOUT_MS = 180 * 1000; // تایم‌اوت آپستریم: ۱۸۰ ثانیه
-
-/** هدرهایی که به‌جای مرورگر به آپستریم فرستاده می‌شود (دور زدن CORS آپستریم) */
-const SPOOFED_HEADERS = {
-  'Content-Type': 'application/json',
-  'Origin': 'https://freemodels.pro',
-  'Referer': 'https://freemodels.pro/',
-  'Accept': '*/*',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
-  'sec-ch-ua': '"Chromium";v="152", "Not?A_Brand";v="24"',
-  'sec-ch-ua-mobile': '?0',
-  'sec-ch-ua-platform': '"Windows"',
-  'sec-fetch-dest': 'empty',
-  'sec-fetch-mode': 'cors',
-  'sec-fetch-site': 'cross-site',
-  'Accept-Encoding': 'identity', // پاسخ فشرده نباشد تا pipe مستقیم ممکن باشد
+/* ---------- لاگ رنگی ANSI کنسول (باید قبل از رجیستری پروایدرها تعریف شود؛
+   چون getProviders() در لحظهٔ شروع ممکن است logReq صدا بزند) ---------- */
+const C = {
+  dim: '\x1b[2m',
+  reset: '\x1b[0m',
+  green: '\x1b[32m',
+  red: '\x1b[31m',
+  yellow: '\x1b[33m',
+  cyan: '\x1b[36m',
 };
+
+function logReq(color, msg) {
+  const t = new Date().toLocaleTimeString('en-GB');
+  console.log(C.dim + '[' + t + ']' + C.reset + ' ' + (C[color] || C.cyan) + msg + C.reset);
+}
+
+function safeDestroy(r) {
+  try {
+    if (r) r.destroy();
+  } catch (e) {
+    /* نادیده بگیر */
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   رجیستری پروایدرها — منبع حقیقت: providers.json (ریشهٔ پروژه)
+   ───────────────────────────────────────────────────────────────────────────
+   معادل خطیِ `src/lib/catalog.ts` + `src/lib/providers.ts` در نسخهٔ Next.js.
+   برای افزودن مدل/پروایدر/سایت جدید فقط providers.json را ویرایش کنید؛
+   این سرور فایل را با تغییرش دوباره می‌خواند (hot reload — بدون restart).
+   اگر فایل نبود یا خراب بود، از BUILTIN_PROVIDERS (کپی داخلی، دقیقاً همان
+   محتوای providers.json) استفاده می‌شود تا نسخهٔ تک‌فایل مستقل بماند.
+   راهنما: skills/add-provider/SKILL.md · skills/add-model/SKILL.md
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 /** هدرهای CORS باز برای پاسخ‌های خود سرور */
 const OPEN_CORS = {
@@ -62,30 +74,495 @@ const OPEN_CORS = {
   'Access-Control-Max-Age': '86400',
 };
 
-/* ---------- مدل‌های سرویس freemodels (طبق سایت) ---------- */
-const FM_MODELS = [
-  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
-  { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
-  { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
-  { id: 'gpt-5.6-sol',      name: 'GPT 5.6 Sol',      vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
-  { id: 'gpt-5.6-terra',    name: 'GPT 5.6 Terra',    vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
-  { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI',        group: 'Other Pro Models', logo: '/zai.png' },
-  { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI', group: 'Other Pro Models', logo: '/kimi-logo-png_seeklogo-611650.png' },
-];
-const DEFAULT_MODEL_ID = 'claude-fable-5.1'; // مدل پیش‌فرض (انتخاب‌شده در سایت)
+const PROVIDERS_FILE = (process.env.FM_PROVIDERS_FILE || '').trim() || path.join(__dirname, 'providers.json');
+const PROVIDERS_RELOAD_MS = 1000; // حداقل فاصلهٔ بین دو بررسی دیسک
+const DEFAULT_TIMEOUT_MS = 180 * 1000;
+const DEFAULT_MAX_BODY_BYTES = 5 * 1024 * 1024;
+
+/** نگاشت نام فیلدهای نرمال → نام فیلد آپستریم، برای هر «شکل» درخواست */
+const DEFAULT_FIELDS = {
+  freemodels: { model: 'modelId', messages: 'messages', stream: 'stream', thinking: 'thinking', deepSearch: 'deepSearch' },
+  openai: { model: 'model', messages: 'messages', stream: 'stream' },
+  anthropic: { model: 'model', messages: 'messages', stream: 'stream', system: 'system', maxTokens: 'max_tokens' },
+  passthrough: { model: 'model', messages: 'messages', stream: 'stream' },
+};
+
+/* کپی داخلیِ providers.json — با `npm run sync:builtin` از روی فایل بازسازی می‌شود
+   و `npm run verify` همگامی‌اش را می‌سنجد. دستی ویرایش نکنید (skills/add-provider).
+   اگر providers.json کنار app.js نباشد، اپ با همین کپی بالا می‌آید. */
+const BUILTIN_PROVIDERS = {
+    "version": 1,
+    "defaults": {
+      "providerId": "freemodels",
+      "modelId": "claude-fable-5.1",
+      "timeoutMs": 180000,
+      "maxBodyBytes": 5242880
+    },
+    "providers": [
+      {
+        "id": "freemodels",
+        "name": "freemodels",
+        "site": "https://freemodels.pro",
+        "enabled": true,
+        "ownedByPrefix": "freemodels",
+        "upstream": {
+          "url": "https://freemodels-chat.freemodels.workers.dev/",
+          "method": "POST",
+          "timeoutMs": 180000,
+          "maxBodyBytes": 5242880,
+          "headers": {
+            "Content-Type": "application/json",
+            "Origin": "https://freemodels.pro",
+            "Referer": "https://freemodels.pro/",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+            "sec-ch-ua": "\"Chromium\";v=\"152\", \"Not?A_Brand\";v=\"24\"",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "Accept-Encoding": "identity"
+          },
+          "auth": null
+        },
+        "request": {
+          "shape": "freemodels",
+          "passthrough": true,
+          "fields": {
+            "model": "modelId",
+            "messages": "messages",
+            "stream": "stream",
+            "thinking": "thinking",
+            "deepSearch": "deepSearch"
+          },
+          "constants": {}
+        },
+        "response": {
+          "profile": "universal"
+        },
+        "groups": [
+          {
+            "title": "Claude Pro",
+            "icon": "sparkles"
+          },
+          {
+            "title": "ChatGPT Pro",
+            "icon": "zap"
+          },
+          {
+            "title": "Other Pro Models",
+            "icon": "globe"
+          }
+        ],
+        "models": [
+          {
+            "id": "claude-sonnet-5",
+            "name": "Claude Sonnet 5",
+            "vendor": "Anthropic",
+            "group": "Claude Pro",
+            "logo": "/Claude-ai-logo.webp"
+          },
+          {
+            "id": "claude-fable-5",
+            "name": "Claude Fable 5",
+            "vendor": "Anthropic",
+            "group": "Claude Pro",
+            "logo": "/Claude-ai-logo.webp"
+          },
+          {
+            "id": "claude-fable-5.1",
+            "name": "Claude Fable 5.1",
+            "vendor": "Anthropic",
+            "group": "Claude Pro",
+            "logo": "/Claude-ai-logo.webp",
+            "default": true
+          },
+          {
+            "id": "gpt-5.6-sol",
+            "name": "GPT 5.6 Sol",
+            "vendor": "OpenAI",
+            "group": "ChatGPT Pro",
+            "logo": "/ChatGPT-Logo.svg.webp"
+          },
+          {
+            "id": "gpt-5.6-terra",
+            "name": "GPT 5.6 Terra",
+            "vendor": "OpenAI",
+            "group": "ChatGPT Pro",
+            "logo": "/ChatGPT-Logo.svg.webp"
+          },
+          {
+            "id": "glm-5.2",
+            "name": "GLM 5.2",
+            "vendor": "Z.AI",
+            "group": "Other Pro Models",
+            "logo": "/zai.png"
+          },
+          {
+            "id": "kimi-k3",
+            "name": "Kimi K3",
+            "vendor": "Moonshot AI",
+            "group": "Other Pro Models",
+            "logo": "/kimi-logo-png_seeklogo-611650.png"
+          }
+        ]
+      },
+      {
+        "id": "mock",
+        "name": "Mock (local test)",
+        "site": "http://127.0.0.1:4100",
+        "enabled": false,
+        "ownedByPrefix": "mock",
+        "upstream": {
+          "url": "http://127.0.0.1:${MOCK_PORT:-4100}/chat",
+          "method": "POST",
+          "timeoutMs": 30000,
+          "maxBodyBytes": 5242880,
+          "headers": {
+            "Content-Type": "application/json",
+            "Accept": "*/*"
+          },
+          "auth": null
+        },
+        "request": {
+          "shape": "openai",
+          "passthrough": false,
+          "fields": {
+            "model": "model",
+            "messages": "messages",
+            "stream": "stream"
+          },
+          "constants": {}
+        },
+        "response": {
+          "profile": "universal"
+        },
+        "groups": [
+          {
+            "title": "Local Mock",
+            "icon": "flask"
+          }
+        ],
+        "models": [
+          {
+            "id": "mock-echo",
+            "name": "Mock Echo",
+            "vendor": "Local",
+            "group": "Local Mock",
+            "logo": "/logo.svg"
+          }
+        ]
+      }
+    ]
+  };
+
+/**
+ * فعال/غیرفعال‌کردن پروایدرها با env (بدون ویرایش providers.json):
+ *   FM_ENABLE_PROVIDERS="mock,mockfm"  ·  FM_DISABLE_PROVIDERS="freemodels"
+ * معادل `withEnvToggles` در src/lib/catalog.ts — برای توسعهٔ آفلاین و تست دود.
+ */
+function withEnvToggles(cfg) {
+  const enable = String(process.env.FM_ENABLE_PROVIDERS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const disable = String(process.env.FM_DISABLE_PROVIDERS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!enable.length && !disable.length) return cfg;
+  return Object.assign({}, cfg, {
+    providers: (cfg.providers || []).map((p) => {
+      if (!p || !p.id) return p;
+      if (disable.indexOf(p.id) >= 0) return Object.assign({}, p, { enabled: false });
+      if (enable.indexOf(p.id) >= 0) return Object.assign({}, p, { enabled: true });
+      return p;
+    }),
+  });
+}
+
+let providersCache = { cfg: withEnvToggles(BUILTIN_PROVIDERS), mtimeMs: 0, checkedAt: 0, source: 'builtin' };
+let providersWarned = false;
+
+function providersWarn(msg) {
+  if (providersWarned) return;
+  providersWarned = true;
+  logReq('yellow', '[providers] ' + msg);
+}
+
+function isProviderEnabled(p) {
+  return !!p && p.enabled !== false;
+}
+
+/** خواندن/اعتبارسنجی providers.json (در صورت نبود یا خرابی ← BUILTIN_PROVIDERS) */
+function readProvidersConfig() {
+  let mtimeMs = 0;
+  try {
+    if (fs.existsSync(PROVIDERS_FILE)) mtimeMs = fs.statSync(PROVIDERS_FILE).mtimeMs;
+  } catch (e) {
+    mtimeMs = 0;
+  }
+  if (!mtimeMs) return { cfg: withEnvToggles(BUILTIN_PROVIDERS), mtimeMs: 0, checkedAt: Date.now(), source: 'builtin' };
+  try {
+    const parsed = withEnvToggles(JSON.parse(fs.readFileSync(PROVIDERS_FILE, 'utf8')));
+    if (!parsed || !Array.isArray(parsed.providers)) throw new Error('کلید providers آرایه نیست');
+    if (!enabledProviders(parsed).length) throw new Error('هیچ پروایدر فعال/معتبری نیست');
+    if (!listModels(parsed).length) throw new Error('هیچ مدلی در پروایدرهای فعال تعریف نشده');
+    return { cfg: parsed, mtimeMs: mtimeMs, checkedAt: Date.now(), source: 'file' };
+  } catch (e) {
+    providersWarn('providers.json خوانده نشد (' + e.message + ') — از کپی داخلی استفاده می‌شود.');
+    return { cfg: withEnvToggles(BUILTIN_PROVIDERS), mtimeMs: mtimeMs, checkedAt: Date.now(), source: 'builtin' };
+  }
+}
+
+/** پیکربندی فعلی پروایدرها (hot reload با throttle یک ثانیه‌ای) */
+function getProviders() {
+  const now = Date.now();
+  if (now - providersCache.checkedAt < PROVIDERS_RELOAD_MS) return providersCache.cfg;
+  let mtimeMs = 0;
+  try {
+    if (fs.existsSync(PROVIDERS_FILE)) mtimeMs = fs.statSync(PROVIDERS_FILE).mtimeMs;
+  } catch (e) {
+    mtimeMs = 0;
+  }
+  if (providersCache.mtimeMs === mtimeMs) {
+    providersCache.checkedAt = now;
+    return providersCache.cfg;
+  }
+  providersCache = readProvidersConfig();
+  if (providersCache.source === 'file') {
+    providersWarned = false;
+    logReq('cyan', '[providers] providers.json دوباره خوانده شد ← ' + providersSummary(providersCache.cfg));
+  }
+  return providersCache.cfg;
+}
+
+/** همهٔ پروایدرهای فعال و معتبر */
+function enabledProviders(cfg) {
+  const src = cfg || BUILTIN_PROVIDERS;
+  return (src.providers || []).filter((p) => p && typeof p.id === 'string' && p.upstream && p.upstream.url && isProviderEnabled(p));
+}
+
+/** پروایدر پیش‌فرض (defaults.providerId یا اولین پروایدر فعال) */
+function defaultProvider(cfg) {
+  const src = cfg || getProviders();
+  const list = enabledProviders(src);
+  const want = src.defaults && src.defaults.providerId;
+  return (want && list.find((p) => p.id === want)) || list[0] || (src.providers || [])[0];
+}
+
+/** لیست مسطح مدل‌های همهٔ پروایدرهای فعال */
+function listModels(cfg) {
+  const src = cfg || getProviders();
+  const out = [];
+  for (const p of enabledProviders(src)) {
+    for (const m of p.models || []) {
+      if (!m || typeof m.id !== 'string') continue;
+      out.push(
+        Object.assign({}, m, {
+          name: m.name || m.id,
+          vendor: m.vendor || p.name || p.id,
+          group: m.group || p.name || p.id,
+          logo: m.logo || '/logo.svg',
+          providerId: p.id,
+          providerName: p.name || p.id,
+        })
+      );
+    }
+  }
+  return out;
+}
+
+/** گروه‌های پیکر مدل به‌ترتیب تعریف (+ گروه‌های استخراج‌شده از خود مدل‌ها) */
+function listGroups(cfg) {
+  const src = cfg || getProviders();
+  const seen = [];
+  const push = (title, icon) => {
+    if (!title) return;
+    if (!seen.some((g) => g.title === title)) seen.push({ title: title, icon: icon || 'globe' });
+  };
+  for (const p of enabledProviders(src)) {
+    for (const g of p.groups || []) push(g && g.title, g && g.icon);
+    for (const m of p.models || []) push(m && m.group, null);
+  }
+  return seen;
+}
+
+/** مدل پیش‌فرض کل سیستم */
+function defaultModelId(cfg) {
+  const src = cfg || getProviders();
+  const models = listModels(src);
+  const want = src.defaults && src.defaults.modelId;
+  if (want && models.some((m) => m.id === want)) return want;
+  const flagged = models.find((m) => m.default === true);
+  if (flagged) return flagged.id;
+  return (models[0] && models[0].id) || want || '';
+}
+
+function normModelKey(s) {
+  return String(s || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+function vendorSlug(vendor) {
+  return String(vendor || 'unknown').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9._-]/g, '');
+}
+
+/** owned_by برای /v1/models — مثل قبل: freemodels-anthropic */
+function ownedBy(model, cfg) {
+  const src = cfg || getProviders();
+  const p = (src.providers || []).find((x) => x && x.id === model.providerId);
+  const prefix = (p && (p.ownedByPrefix || p.id)) || 'provider';
+  return prefix + '-' + vendorSlug(model.vendor);
+}
+
+/** جای‌گذاری `${VAR}` و `${VAR:-default}` با متغیرهای محیطی */
+function expandVars(input, missing) {
+  return String(input == null ? '' : input).replace(/\$\{([A-Z0-9_]+)(?::-([^}]*))?\}/gi, (all, name, fallback) => {
+    const v = process.env[name];
+    if ((v == null || v === '') && fallback == null) {
+      if (missing && missing.indexOf(name) < 0) missing.push(name);
+      return '';
+    }
+    return v == null || v === '' ? fallback || '' : v;
+  });
+}
+
+/** URL + هدرهای نهاییِ یک پروایدر (با جای‌گذاری متغیرهای محیطی و هدر احراز هویت) */
+function upstreamOptions(provider, cfg) {
+  const src = cfg || getProviders();
+  const p = provider || defaultProvider(src);
+  const missing = [];
+  const headers = {};
+  const rawHeaders = (p.upstream && p.upstream.headers) || {};
+  for (const k of Object.keys(rawHeaders)) headers[k] = expandVars(rawHeaders[k], missing);
+
+  const auth = p.upstream && p.upstream.auth;
+  if (auth && (auth.header || auth.env)) {
+    const header = auth.header || 'Authorization';
+    let value = '';
+    if (auth.value) value = expandVars(auth.value, missing);
+    else if (auth.env) {
+      const got = process.env[auth.env];
+      if (got) value = (auth.prefix == null ? 'Bearer ' : auth.prefix) + got;
+      else missing.push(auth.env);
+    }
+    if (value) headers[header] = value;
+  }
+
+  const d = src.defaults || {};
+  return {
+    url: expandVars(p.upstream.url, missing),
+    method: String(p.upstream.method || 'POST').toUpperCase(),
+    headers: headers,
+    timeoutMs: p.upstream.timeoutMs || d.timeoutMs || DEFAULT_TIMEOUT_MS,
+    maxBodyBytes: p.upstream.maxBodyBytes || d.maxBodyBytes || DEFAULT_MAX_BODY_BYTES,
+    missingEnv: missing,
+    providerId: p.id,
+  };
+}
+
+/** ساخت بدنهٔ درخواست آپستریم در «شکل» مورد انتظار همان پروایدر */
+function buildUpstreamPayload(provider, req) {
+  const p = provider || defaultProvider();
+  const shape = (p.request && p.request.shape) || 'freemodels';
+  if (shape === 'passthrough' && req.extra) return Object.assign({}, req.extra);
+
+  const fields = Object.assign({}, DEFAULT_FIELDS[shape] || DEFAULT_FIELDS.freemodels, (p.request && p.request.fields) || {});
+  const out = {};
+  const put = (key, value) => {
+    if (key) out[key] = value;
+  };
+
+  if (req.extra && p.request && p.request.passthrough) Object.assign(out, req.extra);
+
+  put(fields.messages, req.messages);
+  put(fields.model, req.modelId);
+  if (req.stream !== undefined) put(fields.stream, req.stream === true);
+  if (fields.thinking) put(fields.thinking, req.thinking === true);
+  if (fields.deepSearch) put(fields.deepSearch, req.deepSearch === true);
+  if (fields.maxTokens && req.maxTokens != null) put(fields.maxTokens, req.maxTokens);
+
+  const sys = req.system && String(req.system).trim();
+  if (sys) {
+    if (fields.system && shape !== 'freemodels') put(fields.system, sys);
+    else {
+      const list = out[fields.messages];
+      if (Array.isArray(list)) out[fields.messages] = [{ role: 'system', content: sys }].concat(list);
+    }
+  }
+  if (p.request && p.request.constants) Object.assign(out, p.request.constants);
+  return out;
+}
+
+/** فقط آن‌چه UI لازم دارد (بدون URL/هدر/احراز هویت) — داخل window.__FM__ تزریق می‌شود */
+function publicCatalog(cfg) {
+  const src = cfg || getProviders();
+  return {
+    defaultModel: defaultModelId(src),
+    groups: listGroups(src),
+    models: listModels(src).map((m) => ({
+      id: m.id,
+      name: m.name,
+      vendor: m.vendor,
+      group: m.group,
+      logo: m.logo,
+      providerId: m.providerId,
+      default: m.default === true,
+    })),
+  };
+}
+
+function providersSummary(cfg) {
+  const src = cfg || getProviders();
+  const ps = enabledProviders(src);
+  return ps.length + ' provider (' + ps.map((p) => p.id).join(', ') + ') · ' + listModels(src).length + ' model · default ' + defaultModelId(src);
+}
+
+/* ───── ثابت‌های سازگار با کد قبلی (مقادیرِ پروایدر پیش‌فرض در لحظهٔ شروع) ─────
+   هندلرها از توابع زندهٔ بالا استفاده می‌کنند؛ این‌ها برای بنر اجرا و سازگاری‌اند. */
+const BOOT_CFG = getProviders();
+const BOOT_UPSTREAM = upstreamOptions(defaultProvider(BOOT_CFG), BOOT_CFG);
+const UPSTREAM_URL = BOOT_UPSTREAM.url;
+const SPOOFED_HEADERS = BOOT_UPSTREAM.headers;
+const MAX_BODY_BYTES = BOOT_UPSTREAM.maxBodyBytes;
+const UPSTREAM_TIMEOUT_MS = BOOT_UPSTREAM.timeoutMs;
+const FM_MODELS = listModels(BOOT_CFG);
+const DEFAULT_MODEL_ID = defaultModelId(BOOT_CFG);
+
+/**
+ * تطبیق نرم نام مدل + انتخاب پروایدر
+ * «Claude Fable 5.1» / «claude_fable 5.1» / «claude-fable-5.1» همه یکی‌اند.
+ * ورودی خالی ← مدل پیش‌فرض؛ ورودی ناشناخته ← دست‌نخورده با پروایدر پیش‌فرض.
+ */
+function resolveModel(input, cfg) {
+  const src = cfg || getProviders();
+  const models = listModels(src);
+  const dp = defaultProvider(src);
+  const raw = typeof input === 'string' ? input.trim() : '';
+
+  if (!raw) {
+    const id = defaultModelId(src);
+    const m = models.find((x) => x.id === id) || null;
+    const prov = m ? (src.providers || []).find((p) => p && p.id === m.providerId) || dp : dp;
+    return { id: (m && m.upstreamId) || id, publicId: id, model: m, provider: prov, known: !!m };
+  }
+
+  const t = normModelKey(raw);
+  const tl = raw.toLowerCase();
+  let hit = models.find((m) => m.id === t || m.id === tl || String(m.name || '').toLowerCase() === tl);
+  if (!hit) hit = models.find((m) => (m.aliases || []).some((a) => normModelKey(a) === t || String(a).toLowerCase() === tl));
+  if (hit) {
+    const prov = (src.providers || []).find((p) => p && p.id === hit.providerId) || dp;
+    return { id: hit.upstreamId || hit.id, publicId: hit.id, model: hit, provider: prov, known: true };
+  }
+  return { id: t, publicId: t, model: null, provider: dp, known: false };
+}
+
+/** سازگار با کد قبلی: فقط id نرمال‌شده */
+function resolveModelId(input) {
+  return resolveModel(input).publicId;
+}
 
 /* لوگوهای ارائه‌دهنده به‌صورت base64 داخل همین فایل embed شده‌اند تا نسخهٔ تک‌فایل مستقل بماند
    (سایت مرجع همین مسیرها را سرو می‌کند؛ محتوا نسخهٔ ۹۶px بهینه‌شده است) */
 const EMBEDDED_LOGOS = {"/Claude-ai-logo.webp":{"mime":"image/webp","b64":"UklGRuoVAABXRUJQVlA4TN4VAAAvX8AXEFXhlbZtkTQ5c2Z7FHMKKxzsyvf9vqz+/xo6gTX3FHSSG39VZlZW/XMAjzRmmeVNiJklsxTMDGbL7IiyxixX2hOQtVaJLE5TzKwFMYOvKIEvm5nVnmB5TyJt4XIL3KUzaHnMDJbW24j2xFjiE2CX0siFA5CFVpuyBux115qI8pRiLZjriawOWeOJWZbOYHnLE/lsDbQrSyU05WILSlQxnqyOdsYaS8w6j9/MNkUdq/TFTJ8YfksepRhazBO/ue7vChaGxGOKlaHICLm9dADjUBIgyZGkzJ/4QF/Rp0KM6Eo3d4+q6kHDnX4Pn4R2bNuqrWoTOvEQAL87ARyunb1G72PuI88lAwmQJJm2FTjPtm3btm182zYfv23b9n+2bdvm5Tm74zAAkKABGRtZEwJE/QA28Qgv7zhyz41zo18vvCI+EHVKmDm29aJ+0Zvkw35zF4ALO7jB/xvH5WwfuABsuG1cWJ2Ye+4ECK9v/XkAuyAsZAsMD7DFIyBDYeazcolrhwBSHVYca+tlbn8KIVmNsOF/GxeGNFErzwBbNkvMiMkiQkSUtfWvC1h8wsAGRYf78iOvDCl6oOaHJ4PactVq/JpEQqMhw7ysaJER8thglxKRld0PzQ1eNo6kGMy5x+RF8VaPBQ1C9nADekGZ1gzJagMQZubOAElKGZAoucW1gOhl5G47UQwcaG7YPLksllgRkpNsm3gimnt5zxmtJohAtm64wYTICJ6MmM10bikWRUW1Jpm54gQRpZRSvXmCGORuO7GaoA9efGiRSxpBkUrlrgC5O+EUoyGfRqKSDZUHolgPOJNxXG2X62B1X+4RCE1AiLIDJtled4v9ZrktDZVS3ixLusapgNzLxrnaxPp+MZMBeSZQwcojwDIUThGlySYbgBB1CHvrmCsCg/ag7aI8eNjZuAkHsgU7ZlhxBDQsRFLkg+Fx7OeBJbXiAMjmFrvNjcp6gXBvGpoZuahDS7u5tqVxwOJ3JciDH7O8D6eIsSGPOkrpyndctrwO183nIYWyfJ1LBgzVKyYQmMBvafQDLMEFy/IpRsoQMdeDurW64vWHuKjfKh29wJaPBQylST8qRxtArFj/iECqYYQGWywD0zK255AQdnYK76zbFEoA+paZJrOfmnrSHgeOc8g87x4tU7A40NQb6ZKJhSnjNauxRshtT0KEE3qAqsojW0SuvpV4gM3uV0VZeyYOUUp5wlJ6YfGKcXnSiZtcE9uxH9nfHNsC5jZ/fUhFrglG8ZlEabOeUtUZlpMar8KILO4Q9xdJUZtXnABJ0uiGU2yrXjaxEJXid33wytrYipF70IIlGDrG4CuV4Te5JTjCy8Zh1jXSvn8VFrGy0lNG1CiqcHRD2x4BSPqWfVyNVjYDU2xnE0y2P7fkM2s9ACtOnUXDnQx3zbq6A0eY7PiKTFSVEYhO5dZXMdj6GEVuKXZMAK5r9So/PDtgtpRFcmK5DY7ZntutXzYAmU0miByweDN/iDJ7eYXxm71s5UCjKcNHZgn72W3OTvKE2QkMrEQafRUvmZheMMPQ0MfvgsePTANksdEQ1tVxinamIdbxU/OMbGWGMHcuILnF1o0DkNgdSwPj2QGa8yJ8uozXEbd6wy7loiTDkojIM1+muBeOSQvG42molLfAcuER4RoV1ZZ70q+zoMblz94lEjtENq7JKUmIFp3lXizHDrpjg35ktiUtj21xBUxs/wtd80a//iPiuqYZuwCEaPgAyNYgMlpXW/FcIyJZtYDePMnztn7XQfggJZdtHNc59IEhYRNMikfJWnK71zhmJhZHjKwPxg8tXyk/pvjMMI4EQ6Aqw/SFCJEFLbXIZiKJbF1/zdwZ7CsDkkQCoXXdG3154YVj9qFKYGLfwzglXkfcwO4cP9nsFkDI3agD7uCYnFaNLVnQLkcWcUDcb5LuqL06ghWP7IDNylf9VC8V2lraqJvGo9GsicDMaHmmoG2ENtHuQlpyzsFLNwyAOjT3+RaPBT0LqkpL6SNrqKe1zaluFGdkC5fvWby7sWwyI1lhSEYBDCCDiR6oy28Yk4cMWNjZfd3jw8UjEs7LAFXliQiENP39WR7Hz5Mm942EygL81hCzwXbSG0BzL235Gbik1VQ2XRNuKtA3iDT6OA7NjDAdfSTQUHdxx0aes2gZnUMf2hrPNS/iWT5Bo3dRt11JjEYMP95bBcqEJLEzoid/Ns4fsqgDiavvF0Vplkz/4EmDhV3IrMq5x2+DweXIjlL+Dk+CfoIz6mXK+gkrToBjxbp2BNvNdUU4ohfmVM/KBi29DGgeT+Se7zmTvJk1PJtasJ9C34Em4yu+UmH6ITj8fOJu555PPGyr11s9gRB9gayz/JNqSIASGjTV4rNSx8IMX9PZTdrTeYeOkoM4jlxo0cj+SMTlr3Vz2xMPGA+loVLdJtNAbPTrxgtN3p/XXNIqoNklp3hPIPqlTjUbbhuPNFdqM0sWdvBGZMzkj6ggd9uJOjR3Y7xkZkRv4nBfHry4jdhXngDwM3NqRsioSTv4yrITiWTUS58swTI0m4xVemZHYQlhRS8T2+HO1zksmoYH3DUxEWk8UXHB8LLlK0KUDbDXMfESeln5o6pVpwrR7LyRS68XHdDbRUlP/qQ7BhaDnalJc+kwz43AgKj/2LKJxYT3YKgqlifOlhx27gIcG6cCq04XkmFy06l8lJRnOsYP3HKz51n87bxeSrR3dQES2ROBkQmLyaU9Hn602VXhvOamgeiLtGfZqZZZ9UMfZcHRBHyvuRyK04MDqxjXh3lhVkFkWR6ZLTIFZEWsFQvGjiM7armipQcYTu5apFOGSTd1Ko9wg383zh/QC33MQhgsVES9D029FBuV8HNXsOZ5GjGOjy8qdbfXWqsqy06MBXfuROVcdSCTq4neFGxxLpg1CwlxcHVsfpP7sWaMl8UO0d5fIZyZNtzrWNH+XyDDzOa6KdvpNHfn7aSUR8pw4N5XnEBYNQunmoSgTHgwubdZLC14qhh2pzQMKdbJHTjOAAD6iW2hC9qXoay5sYWw21UWOHWwKopBS6NfLLJplPQdk4rJZ6444yw0GkBUilDEvbIuTxAlPVUcu6ooeMIiGeniGg03AebyfU1mGrp+l9GNjS5WC3KR018c29ldnpRxWU4fZO6YAChBKHf1ZMne9VoDVToupQSpWDdwjKXWZn9e+bVLXd0ES3Jc2HfCNghYGG/FE51ZQjTbyg7k5ZYYg8Ls1wttrOeVCoSoI2D0VwYGQ3yOGEMkpAj7V8Dgc4+lK6/A8AQWqkEYOJ7yWDIniH4uzYETPKpeCtMdSxV2h09QJlc/QAbZbA43CQe4fS9sG1vW2K4T4zt2Q9/xLJSuacwhJPXcbSec/iAZdaM5W8I5UY/lZ4u7LQkODhhSbkmYaoEL54h371xrN1xebFg6RJcFWwb0Ppv5KjEoUkz3nXrd6bcNakbGRw5lLLNO+UiDEJXUdozjyQXH9x3rF1hdDp2FZmWbXxewuQFkcjUZLqls9wit+D8Xrv3wfhjezD5ri/twNMhreUwcJGqyXqjjPXBJzfe7Rfp2fb86PfZYk88lYr4oqdksv6GP3wVdVvbJSvuWuDL1a9e6Pdk5hmGGdsKK/2L3PeM9zZNB4iC765mGv9SzvsT97/tBVsX388va0iFEqizoFfqethbH4yJOCZsjbHJ28JI6pAEAs9OEbD/oVtXsacePPDXRitO0NTE5o1gwGefJHfs2lpWMPzje4/bkp9DUX9dhkTWq++Ayrv/FX+tCi/ag+Jso9OU4I2y5MPdp3KL3sBPXiBty9Ko3HIHc3Jop51cXCVF32ffD0F92PDW7MNOprTwDcdpqTm/PYpKhi7GJJGNWlQSLgV+dXp/Wfv6pr1vaLWK0zfkqYfT53G0nTCvk5xS2vxkWlMl3J0TOYrXqeQ2lVMOr7ud0Az/0u97szJEnS6CG4/tqvBLrFdhOcJop4hkx+NyRaXZ0Bi4skD6WQ3aYHW4gTtO4VWnWjjw+c9rZa1VevsAO/DyGBiQkGdhXHSr7sDC25bVgfprtgLBfRLs/28PhmgDAXeWIA7d4ybiRfpOWU3dhdrI9ze4lFg/ZvmXx+2REa8i2Mw5+K8t5QtpVq9N2ausrrTiO0zzGcWuieQ7732cFzkpTKMk1WWKEr1rGGnadk7hR0nbqdcdpJ4kbmZplIBxT42/hR/zMoY76S7zhddHCW+MMIYhhN4noBs3dfkQBR1iefoufYnGL1Ecs3zH8vSDR1oZd2H+cbSW5B9kE38N///Y+uW8/CdibAExFnmtQtT9IItjHzbarhDBMgdiz2e52PJ6vzFySYXovhpZTsqg+5SlP+ZFsqygtJPud5dOLszz6mryIlCx3ds0/5zmPjuI19lwUuaNJkgzafSeP9QKu2+jXjXcO/y3L593sx91VXzJ01Oz0r52jZsRmJU7TeGLytP5V6GVYhoufUI59ozawjxjTn6FStU3Xmk5eaxAuO47TNWFgiqyDF2ZSvTQPaTxKLmaSBIe5bYROtuplMDVMoFVbN8zeJONTog2csirx8AQEwrLfLfriPK/a66zft8S9gz4gSpCe1MQzhqknmF64WxvAiLIDm3dWY/hY2lkfsdLcEaaeLWMiri044XJR8wYXkmFBjnqlFZEQGUtZf01NBoRYKfXAQfp/JOcXbDzAY4sf6zUAgE/VeCbyfaVTxnGxlo5N7+cHi0pZrtMIW0vZekJ2Hcqy3pOVrBgLeZLUTEsPb4Z8Gsk6dKH9lI323K0zYe0cAHy8HnxFTRY2W8Bk57Eq43fr+07DxIRBD2e7xI5wmY8/hWQ8/s+xcaXjOLEeRtlNwjtVNIqUWiwurLIlY3JPYFUe6hvLutxSLEucuHPofwQOTsetzo5B/pLj1HYnfGbTnQaAGFbJ0pUuGNNRrzMlwzPtp1cFML7+liWlHnhmmhCKfz1zLCAViWsI3wQAPvDyZLKN09fCdHz/7vHktdaaeik89ZzdP+HWQ5bi3Tu9qkG6f6qXbvYEA5qaVth62KVJWE/qiZpTvDGSIwLuA4mpoDPVc7cqQ9Izs1urh2U9KeMYCtiBNiB1GMjx/ZGbgXH8vXN0dHOTt4gCtFhTYUs28ntWw0fQS5BM/pZQqWrVQuIopfx5aT5/tFUER4mpstvmfFME3IEt6WXdb5J6uKwH+u6Ly0a/a6TZpPE0cN1Ma6YPTBmp/ZQK5zOaw2DRdY68JuPmx9ztdMewg5yKWvA2aAOwvOQAaNvxJ+DG9dC3xRUwlUJeb0ovpHQyNtuu/FjX1ngVlqbzHDeUL+B2Z5GFzc6rIlH6rBdU/o0ws2LQ25t+aBY9uTMQGlahemkcekXVxop71Ea3OQdDH98FdXNz8td6ntGprzX9UiFtgXYdRD/GPcPS6DMjinYznlpuPb92qTv53MYyXkDXNcnk67f4VaV6Y7d/x6iXY0HA4JJNms1L1+rS+u1159gAudtOzNWRofsLK9XGmZvaagBwv5VAVWdY4wRaPjOuNYORDHMRItxsXX5+pEvnyIa5oaVbyW2Aw37xiVu0qT9yjp4ySp8qljWXV4yBBG3wR5z0Ab2Ip1RvJEMvYy0Iz6Shd/CyuKPjfoQkc5cyPOC5mxmNF75ht+lAqWAm2zBpNaLEdnxkVs30UpE2HNNapqKXBQm7UHiTd+XK7ZCWYfjX8oMJmuRW1fu550bgPC2/unDTq/aG8Q2pgTnZggX05X49RHDqJ57s5X1w9sgari9pyzWJTqMXWtMkXZpeeQX08kO8Ly24icGNWf5vLSlVFRXpYekChWRypVPdxVdmGMhtTzxor2Nsmuwa1+Ik7gCb9jTUY3urp9QDX/76I8KJSpCRzY+fyFgML7eyZUJnrTVIgToeZT5USv1Z7ljAKwnoRzg6w+jM/oRokrCuoK7m8awZVyBnnnwpFzegh6yR8G7Vfs/dejS0bbcImltp3Hrqja9/wF9AMmqsqzf3Nay5pyGwNPoQdSQQXlpn3rGxPHGzSNDHdrFJJEzv0D+/Cx6KgYiP025VVc+cCuc6kuPbpT65Y2sO8f2wGr+cMNEmKRJc4CEuVehUE9C0duAWttEmlpXfIvdVfljJ6NuJOG+8JUw1ehuHuvjYSv4f79afF/bZqsk9sbtO+p3m+h3iVkeUh5u/vkmh7Zrq6qMb9gaqMlJ6oVPHEAlQB6WpaWjYvqkDfWjL9XFoFiGfioTYvGZ8Salw/vUPhd0GWqwZPlIg8BnHs9lknWisYTFX10H0dfrgSik/pp0Npj3E75gI8kDmIOoA+vivSmAUCejde3D83G0nQNJXr6OVnlJXnYo2Z6O3iwgGNpvZgBZ0YBoaOpF8ZaAIG/164SUcGl9UfkvzrDJqGT3OMzyphciBg1/QTeYWV2B/QqQ0SsayVA59RAau3Soid9uJumOhchvave7ZAb2ep9QuwxPgtDO3PQkZdE3wEpdfMNPUkdA2Oh0tdqZmkUbd0UYfkJAy3MDM0o69iu60Zo2qe/wynC2tyqF6mChUW540lF7YQxlLDIx6iEVsJVDKm9amFiYT90FYNGESCduz98DF6CiYBMpxrNJTmoe19S8LGC+UIQdG/dxtJ9iWTCwZjJ5Zs8tiR5rwYhoqT1i4JC/VMGpS/a1lYYhIeca1sUZvwTGo/tt6yBrZn5A9fEJeEKMlQx1kb8/3lFIPHhN8hmO2JNHs9cuqOk3uzCZ//Cdmfq0ONHnEMDilmFLHK4iAPsBt2uT4/P+XfnTi4H5avlJqqSZi368kpijB0VmMziwqQtR5oNxtJxCZjdu+0qZR9Cq/uGqJFwFIRnHjemmV0Pm6JX8MoH3EKtswP7Gq1A29sl6n7xKJxXnkCRtKdWtPiMjKOUTR0cPKk1aNolNhYBrz3F+X4dAn93aIiNB7jl2Ucqb1upzfxbcwJS8TVl6BQKmgwvK3ZVg5eM7YN26psaSbT9wGgIuSuSafpoVE/Cb6yLoWOFaewHAlDZXy47e1zv6OOf+py5c6DJCYy//Sa3WtE9T8szwJi9ZkRKilfydgmTe2rFSYssywdvrjJ7cpwrBecSEfO4XO5Tu2PdUW10Khqn5/U1uuwmHnE7dl4t3bcN4WphqzB/UiRrip4520oZS/8goiua74rFZKyUv0zwhRZiAMe/d7siQM8M0ygqeU8ivvXGz8Dnhxbv4Pff+SV0d0Q/kgiSgezg4rldq3nAmjxY4+Yr9g/0lt6o52sQxQp1hx9korZmzmiWgUlfFcPrOfmjI80Guu5onFALaOg9Usz2lcNGhd7Dt8JUGYC9I8erfcfBLAXFkPtoGioRnhDJOFNDhLyKDclIoH7Zx5ZChnGyT9osvz+/9843En2YmDbGjg5heh/QirF0fxC2xXCkCIsgOwaHMxh20j9vHlK6+gUKnl4QN0Stw5tpUwmBMZy5UXMOs4/tl/Cv1tJyCBtvdAtmHPrNqaovTr4ecT9/EjbGvbkbLN4O1mRx+gzAQ="},"/ChatGPT-Logo.svg.webp":{"mime":"image/webp","b64":"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"},"/zai.png":{"mime":"image/png","b64":"iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAFFklEQVR42u2dP4hcVRTGf29mDKsBSawUhAQsjCIYLWxMCklhGkHIgtjo2KTQpLEyKSwEN6aMiY2F2UpR1lLcgJUGRNAUFjGCxVoZFFeERPfP/LGYc9zHsPPeHSHe7753D1x2d+bN7rnnnfu9c86391zIkiVLlixZskSR4g5f/3/IOHH926G8qv7FHNeNgXuAu+f0ujvp+XcBt21USQcYAfeJrdyFXsCFrvwB4AubxDiyR43s7/8JPAP8ZT+Pdrm2BwyA14C3gCHQjWz8IbAAfBTi+T27CV+a4ZXGC6bnLIP6608Cm2K6/wjsq7sBvkLetg9tmZfFHFumy4UpHXdzng6wF7hhnxlE1n0IbAMbwOE647v3PGvKb9sviek1A/v6LbDHdCxqnGe5pH9sr3cdTtc4Dx2b2P3AL6W7F1P5kd2AW8DDJT2rjN8XNP5KnfGL0pufT3mewgReqpmA35RDFh0NBVauO+8asN907NTh/hlB7/kgAPe7Bk/XRJxnZPoPgaM1QcO/bxwpPTBUvOe65SEhuH9J0HnOhOB+x0KjtanJx8b9ctRQF3IuChnfV99qyfhFnfd/bB/atBswiDg8dn81EPcPAOum91Bg5Y6AmxbMFFW478Z/QzDZ+iQA93s2h6tiuD+2MH7myvUsdwg8CDwHfGOTillq8FLHH8DJijKDT2wALAFP2/c94srQdHgHuFIqhwQlXimJ63xcMFn8ypy7N68zF0KjU6F8OVm8KZIs+rNn3Z5HVcli8rV9h5lVwWRxMWFUCRLlZPFiXbyfurhXHRVKFn31XQsoEiYtnizuF0sWh1YkPNRk3C8v6xVB6Ok3HXp8YqcFjb/cFtx3anEgVCT8wVi3TlNx30vMe22ySkXCTXOKVoScitTiqbbgfl+wxLzSdOOXqcVbYri/RgC12ATcT5ZabAr0XCRBarEpxj9BotRiE3D/IDvUogLuB1OLTcD9DhMyQ41aPN4W3D8niPtLbSk1KFKLV/mP1GJKuK9MLR5scolZnVo80ZaQU5FavNQW3Pf/Q1UoNbSGWvRYWo1a9P0HraMWlXC/3xbcP0WmFqPhvjK12GjcV6UWt8jUovauxaYYvy9YYv606cZXphZ/ZodabDTuq1GLAzK1GB33z7YF9xWpxSslHRtNLSa7a7EJJeZMLUaGniVB3D/XllKDYosb37XY6N0rii1uMrUoAD2LbQk5867FiLiv1OIm71pEg1p8pC0hZ6YWIxo/U4sRcT9Ti5FCTm+ImnctRoSeZTK1GM34fUHjt27XYnINUVPH/bxrUQB68q7FiCFn3rUYEfdTpRa9RK405i4xp0otqq6IYjdsnwU93hD1CHoNUVeZ3RC1a9c+BbxL/Ea0hem5h8lRMK9T3YxWmlqs27XokHQv8JPA86o8toBHp+B9Jm6m2hDVV+mH6DQh3zBdnq8Ll1NviOq6nyRRZi7lXYt+Ux4D/kZr0993BDBzKVOLnqkvAN8LRWzBm/6UqcXbARPwVfG+4Mp9eR7oUWyI+kog9LwoqPvleYyfYkNUXxEPMTlXUqlCe30eZu5xC5W2S5OINRy7b1DdENVxvwt8PZWvxDyq0Jm5J0IrtPuYHCyplrDUUYv++gUx3cdMTm4NqtD2gPPAA8BvaBzz2gXetMinrtRwzB5yvwqVST4D3iPw3JjCjL8hVrxaZ+cc4yrxA5rHIvoXwO8lXcYkKo2s7c+aqOJkxwnfqDFZsmTJkiVLFn35B1qlFEc6E28rAAAAAElFTkSuQmCC"},"/kimi-logo-png_seeklogo-611650.png":{"mime":"image/png","b64":"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"}};
 const BOOT_AT = Math.floor(Date.now() / 1000); // برای فیلد created در /v1/models
-
-/** تطبیق نرم نام مدل: «Claude Fable 5.1» یا «claude_fable 5.1» هم پذیرفته می‌شود */
-function resolveModelId(input) {
-  if (!input || typeof input !== 'string') return DEFAULT_MODEL_ID;
-  const t = input.trim().toLowerCase().replace(/[\s_]+/g, '-');
-  const hit = FM_MODELS.find((m) => m.id === t || m.name.toLowerCase() === input.trim().toLowerCase());
-  return hit ? hit.id : t || DEFAULT_MODEL_ID;
-}
 
 /* ---------- کلیدهای API (طبق قوانین OpenAI و Anthropic) ----------
    • کلید سبک OpenAI    : sk-...      → هدر Authorization: Bearer <key>
@@ -136,28 +613,6 @@ function keyIsValid(k) {
   return !!k && (k === API_KEYS.openai || k === API_KEYS.anthropic);
 }
 
-/* ---------- لاگ رنگی ANSI کنسول ---------- */
-const C = {
-  dim: '\x1b[2m',
-  reset: '\x1b[0m',
-  green: '\x1b[32m',
-  red: '\x1b[31m',
-  yellow: '\x1b[33m',
-  cyan: '\x1b[36m',
-};
-
-function logReq(color, msg) {
-  const t = new Date().toLocaleTimeString('en-GB');
-  console.log(C.dim + '[' + t + ']' + C.reset + ' ' + (C[color] || C.cyan) + msg + C.reset);
-}
-
-function safeDestroy(r) {
-  try {
-    if (r) r.destroy();
-  } catch (e) {
-    /* نادیده بگیر */
-  }
-}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    استایل صفحه (PAGE_CSS) — بدون backtick
@@ -426,7 +881,10 @@ const PAGE_JS = String.raw`
 'use strict';
 
 /* ================= ثابت‌ها ================= */
-var MODELS = [
+/* دیتای تزریق‌شدهٔ سرور: کاتالوگ زندهٔ مدل‌ها/گروه‌ها (providers.json) + کلیدها */
+var FM_DATA = (typeof window !== 'undefined' && window.__FM__) ? window.__FM__ : {};
+/* لیست پشتیبان — فقط اگر تزریق سرور انجام نشود (مثلاً بازکردن مستقیم HTML) */
+var MODELS_FALLBACK = [
   { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
   { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
   { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
@@ -435,7 +893,9 @@ var MODELS = [
   { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI',        group: 'Other Pro Models', logo: '/zai.png' },
   { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI', group: 'Other Pro Models', logo: '/kimi-logo-png_seeklogo-611650.png' }
 ];
-var DEFAULT_SETTINGS = { modelId: 'claude-fable-5.1', thinking: false, deepSearch: false, stream: true, systemPrompt: '' };
+/* منبع واحد در زمان اجرا: همان چیزی که سرور از providers.json فرستاده است */
+var MODELS = (FM_DATA.models && FM_DATA.models.length) ? FM_DATA.models : MODELS_FALLBACK;
+var DEFAULT_SETTINGS = { modelId: FM_DATA.defaultModel || 'claude-fable-5.1', thinking: false, deepSearch: false, stream: true, systemPrompt: '' };
 var MAX_RAW_LOG = 80 * 1024; // پنل Raw SSE: نگه‌داری آخرین ~80KB
 
 var SUGGESTIONS = [
@@ -1679,6 +2139,17 @@ var MP_GROUP_ICONS = {
 };
 var MP_CHECK_SVG = '<svg class="mp-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>';
 
+/* نگاشت «نام» آیکن (providers.json → groups[].icon) به SVG — تا گروه جدید بدون
+   تغییر کد آیکن درست بگیرد؛ نام ناشناخته ← globe */
+var MP_ICON_SVG = {
+  sparkles: MP_GROUP_ICONS['Claude Pro'],
+  zap: MP_GROUP_ICONS['ChatGPT Pro'],
+  globe: MP_GROUP_ICONS['Other Pro Models'],
+  flask: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.31"></path><path d="M14 9.3V1.99"></path><path d="M8.5 2h7"></path><path d="M14 9.3a6.5 6.5 0 1 1-4 0"></path><path d="M5.58 16.5h12.85"></path></svg>',
+  bot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>',
+  brain: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"></path><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"></path><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"></path><path d="M6 18a4 4 0 0 1-1.967-.516"></path><path d="M19.967 17.484A4 4 0 0 1 18 18"></path></svg>',
+};
+
 /** مدل فعلی بر اساس تنظیمات (تطبیق نرم با نام هم انجام می‌شود) */
 function currentModel() {
   var raw = (settings.modelId || '').trim();
@@ -1721,17 +2192,31 @@ function buildPicker() {
   if (!pop) return;
   pop.innerHTML = '';
 
-  /* ترتیب گروه‌ها = ترتیب اولین ظهور در MODELS */
+  /* ترتیب و آیکن گروه‌ها: اول از سرور (providers.json → groups)، بعد گروه‌های
+     دیده‌شده در MODELS (تا هیچ مدلی بی‌گروه نماند) */
   var groups = [];
+  var groupIcons = {};
+  var srvGroups = FM_DATA.groups || [];
+  var k;
+  for (k = 0; k < srvGroups.length; k++) {
+    var gt = srvGroups[k] && srvGroups[k].title;
+    if (!gt || groups.indexOf(gt) >= 0) continue;
+    groups.push(gt);
+    groupIcons[gt] = MP_ICON_SVG[srvGroups[k].icon] || MP_GROUP_ICONS[gt] || MP_ICON_SVG.globe;
+  }
   for (var i = 0; i < MODELS.length; i++) {
-    if (groups.indexOf(MODELS[i].group) < 0) groups.push(MODELS[i].group);
+    var mg = MODELS[i].group;
+    if (groups.indexOf(mg) < 0) {
+      groups.push(mg);
+      groupIcons[mg] = MP_GROUP_ICONS[mg] || MP_ICON_SVG.globe;
+    }
   }
 
   groups.forEach(function (g) {
     var gd = el('div', 'mp-group');
 
     var gh = el('div', 'mp-ghead');
-    gh.innerHTML = (MP_GROUP_ICONS[g] || '') + '<span></span>';
+    gh.innerHTML = (groupIcons[g] || '') + '<span></span>';
     gh.lastChild.textContent = g; // عنوان گروه به‌صورت متن امن
     gd.appendChild(gh);
 
@@ -1931,13 +2416,19 @@ if (document.readyState === 'loading') {
 /* ═══════════════════════════════════════════════════════════════════════════
    صفحهٔ HTML (ترکیب CSS و JS بالا)
    ═══════════════════════════════════════════════════════════════════════════ */
-/* دیتای تزریق‌شده به کلاینت (مدل‌ها + کلیدهای API برای بخش ⚙️ تنظیمات) */
-const SERVER_DATA_JSON = JSON.stringify({
-  models: FM_MODELS,
-  defaultModel: DEFAULT_MODEL_ID,
-  openaiKey: API_KEYS.openai,
-  anthropicKey: API_KEYS.anthropic,
-});
+/* دیتای تزریق‌شده به کلاینت: کاتالوگ زندهٔ مدل‌ها/گروه‌ها (از providers.json)
+   + کلیدهای API برای بخش ⚙️ تنظیمات. در هر درخواست ساخته می‌شود تا تغییر
+   providers.json بدون restart در پیکر مدل دیده شود. */
+function serverDataJson() {
+  const cat = publicCatalog(getProviders());
+  return JSON.stringify({
+    models: cat.models,
+    groups: cat.groups,
+    defaultModel: cat.defaultModel,
+    openaiKey: API_KEYS.openai,
+    anthropicKey: API_KEYS.anthropic,
+  });
+}
 
 const PAGE_HTML = `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
@@ -2067,7 +2558,7 @@ ${PAGE_CSS}
 
 </div>
 <script>
-window.__FM__ = ${SERVER_DATA_JSON};
+window.__FM__ = __SERVER_DATA_JSON__;
 </script>
 <script>
 ${PAGE_JS}
@@ -2079,21 +2570,41 @@ ${PAGE_JS}
    سرور HTTP — روت‌ها و پروکسی آپستریم
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/** باز کردن درخواست POST به آپستریم با هدرهای جعلی؛ همان لحظهٔ رسیدن هدرها resolve می‌شود */
-function openUpstream(body, timeoutMs) {
+/**
+ * باز کردن درخواست به آپستریمِ یک پروایدر با هدرهای جعلی؛
+ * همان لحظهٔ رسیدن هدرهای پاسخ resolve می‌شود تا بدنه تکه‌تکه pipe شود (بدون بافر).
+ * پروتکل از روی URL انتخاب می‌شود (https برای سایت‌های واقعی، http برای آپستریم محلی/mock).
+ * @param {string} body       بدنهٔ JSON
+ * @param {number} [timeoutMs] تایم‌اوت — پیش‌فرض از تنظیمات همان پروایدر
+ * @param {object} [provider]  پروایدر — پیش‌فرض: پروایدر پیش‌فرض رجیستری
+ */
+function openUpstream(body, timeoutMs, provider) {
+  const cfg = getProviders();
+  const p = provider || defaultProvider(cfg);
+  const up = upstreamOptions(p, cfg);
+  const ms = timeoutMs || up.timeoutMs;
+  const doRequest = /^https:/i.test(up.url) ? https.request : http.request;
+
   return new Promise((resolve, reject) => {
-    const req = https.request(
-      UPSTREAM_URL,
+    if (!up.url) {
+      reject(new Error('UPSTREAM_CONFIG — پروایدر «' + p.id + '» آدرس آپستریم ندارد (providers.json)'));
+      return;
+    }
+    if (up.missingEnv.length) {
+      logReq('yellow', '[upstream] ' + p.id + ': متغیر محیطی تعریف‌نشده ← ' + up.missingEnv.join(', '));
+    }
+    const req = doRequest(
+      up.url,
       {
-        method: 'POST',
-        headers: Object.assign({}, SPOOFED_HEADERS, {
+        method: up.method || 'POST',
+        headers: Object.assign({}, up.headers, {
           'Content-Length': String(Buffer.byteLength(body, 'utf8')),
         }),
       },
-      (res) => resolve({ status: res.statusCode || 502, headers: res.headers, res, req })
+      (res) => resolve({ status: res.statusCode || 502, headers: res.headers, res, req, providerId: p.id })
     );
-    req.setTimeout(timeoutMs, () =>
-      req.destroy(new Error('UPSTREAM_TIMEOUT — پاسخ آپستریم بیش از حد طول کشید (۱۸۰ ثانیه)'))
+    req.setTimeout(ms, () =>
+      req.destroy(new Error('UPSTREAM_TIMEOUT — پاسخ آپستریم بیش از حد طول کشید (' + Math.round(ms / 1000) + ' ثانیه)'))
     );
     req.on('error', (err) => reject(err));
     req.write(body, 'utf8');
@@ -2138,9 +2649,11 @@ function sendJson(res, status, obj) {
 
 /** GET / — صفحهٔ چت */
 function handleHome(res) {
+  /* جای‌گذاری کاتالوگ زنده در هر درخواست (function-replacement تا الگوهای $ در JSON مشکل نسازند) */
+  const html = PAGE_HTML.replace('__SERVER_DATA_JSON__', () => serverDataJson());
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-  res.end(PAGE_HTML);
-  logReq('green', 'GET / → 200 HTML (' + Buffer.byteLength(PAGE_HTML, 'utf8') + ' bytes)');
+  res.end(html);
+  logReq('green', 'GET / → 200 HTML (' + Buffer.byteLength(html, 'utf8') + ' bytes)');
 }
 
 /* ---------- POST /api/chat — پروکسی استریم ---------- */
@@ -2166,22 +2679,38 @@ async function handleChat(req, res) {
       return;
     }
 
-    /* نرمال‌سازی نام مدل (مقاوم): «Claude Fable 5.1» و «claude_fable 5.1» هم قبول می‌شود */
+    /* انتخاب پروایدر از روی مدل + بازسازی بدنه در شکلِ همان آپستریم
+       (نام مدل نرمال می‌شود: «Claude Fable 5.1» و «claude_fable 5.1» هم قبول است) */
     let bodyOut = body.data;
+    let resolved = resolveModel(null);
     try {
       const j = JSON.parse(body.data);
-      if (j && typeof j === 'object' && 'modelId' in j) {
-        j.modelId = resolveModelId(j.modelId);
-        bodyOut = JSON.stringify(j);
+      if (j && typeof j === 'object') {
+        resolved = resolveModel(typeof j.modelId === 'string' ? j.modelId : typeof j.model === 'string' ? j.model : null);
+        const extra = Object.assign({}, j);
+        delete extra.modelId;
+        delete extra.model;
+        bodyOut = JSON.stringify(
+          buildUpstreamPayload(resolved.provider, {
+            messages: Array.isArray(j.messages) ? j.messages : [],
+            modelId: resolved.id,
+            thinking: j.thinking === true,
+            deepSearch: j.deepSearch === true || j.deep_search === true,
+            stream: typeof j.stream === 'boolean' ? j.stream : undefined,
+            maxTokens: typeof j.max_tokens === 'number' ? j.max_tokens : undefined,
+            system: typeof j.system === 'string' ? j.system : undefined,
+            extra: extra,
+          })
+        );
       }
     } catch (e) {
-      /* بدنهٔ JSON معتبر نبود — همان خام به آپستریم می‌رود */
+      /* بدنهٔ JSON معتبر نبود — همان خام به پروایدر پیش‌فرض می‌رود */
     }
 
     /* اتصال به آپستریم */
     let up;
     try {
-      up = await openUpstream(bodyOut, UPSTREAM_TIMEOUT_MS);
+      up = await openUpstream(bodyOut, UPSTREAM_TIMEOUT_MS, resolved.provider);
     } catch (err) {
       const msg = (err && err.message) || String(err);
       const isTimeout = /timeout/i.test(msg);
@@ -2199,7 +2728,7 @@ async function handleChat(req, res) {
       );
       return;
     }
-    log('cyan', '← آپستریم پاسخ داد: ' + up.status);
+    log('cyan', '← [' + resolved.provider.id + '/' + resolved.publicId + '] آپستریم پاسخ داد: ' + up.status);
 
     /* هدرهای پاسخ — حذف access-control-* ، transfer-encoding ، content-encoding ، content-length */
     const outHeaders = {};
@@ -2213,6 +2742,7 @@ async function handleChat(req, res) {
     }
     outHeaders['Cache-Control'] = 'no-cache, no-transform';
     outHeaders['X-Accel-Buffering'] = 'no';
+    outHeaders['X-Provider'] = resolved.provider.id;
     res.writeHead(up.status, outHeaders);
 
     /* pipe مستقیم: هر تکه همان لحظه رد می‌شود تا SSE زنده بماند (بدون تجمیع بافر) */
@@ -2271,22 +2801,48 @@ async function handleChat(req, res) {
   }
 }
 
-/* ---------- GET /api/ping — تست اتصال ---------- */
-function handlePing(res) {
-  const started = Date.now();
-  const body = JSON.stringify({
-    messages: [{ role: 'user', content: 'ping' }],
-    modelId: DEFAULT_MODEL_ID,
-    thinking: false,
-    deepSearch: false,
-    stream: false,
-  });
+/* ---------- GET /api/models — کاتالوگ زندهٔ مدل‌ها/گروه‌ها برای UI ----------
+   فقط دادهٔ عمومی (بدون URL/هدر/احراز هویت آپستریم) برمی‌گردد.
+   در نسخهٔ Next: src/app/api/models/route.ts                              */
+function handleCatalog(req, res) {
+  const cfg = getProviders();
+  const cat = publicCatalog(cfg);
+  sendJson(res, 200, cat);
+  logReq('green', 'GET /api/models → 200 (' + cat.models.length + ' مدل / ' + cat.groups.length + ' گروه)');
+}
 
-  const upReq = https.request(
-    UPSTREAM_URL,
+/* ---------- GET /api/keys — کلیدهای API برای مودال ⚙️ تنظیمات ----------
+   معادل در نسخهٔ Next: src/app/api/keys/route.ts
+   در app.js همین داده داخل window.__FM__ هم تزریق می‌شود؛ این endpoint برای
+   یکسان بودن سطح API هر دو نسخه اضافه شده است. (اپ محلی/شخصی است) */
+function handleKeys(req, res) {
+  sendJson(res, 200, { openai: API_KEYS.openai, anthropic: API_KEYS.anthropic });
+  logReq('green', 'GET /api/keys → 200');
+}
+
+/* ---------- GET /api/ping — تست اتصال (با ?model= همان پروایدر تست می‌شود) ---------- */
+function handlePing(req, res) {
+  const started = Date.now();
+  const url = new URL(String(req.url || '/'), 'http://localhost');
+  const resolved = resolveModel(url.searchParams.get('model'));
+  const provider = resolved.provider;
+  const upOpts = upstreamOptions(provider, getProviders());
+  const body = JSON.stringify(
+    buildUpstreamPayload(provider, {
+      messages: [{ role: 'user', content: 'ping' }],
+      modelId: resolved.id,
+      thinking: false,
+      deepSearch: false,
+      stream: false,
+    })
+  );
+
+  const doRequest = /^https:/i.test(upOpts.url) ? https.request : http.request;
+  const upReq = doRequest(
+    upOpts.url,
     {
-      method: 'POST',
-      headers: Object.assign({}, SPOOFED_HEADERS, {
+      method: upOpts.method || 'POST',
+      headers: Object.assign({}, upOpts.headers, {
         'Content-Length': String(Buffer.byteLength(body, 'utf8')),
       }),
     },
@@ -2313,13 +2869,19 @@ function handlePing(res) {
           /* پاسخ JSON نبود — همان متن خام */
         }
         sample = String(sample).slice(0, 200);
-        logReq('green', 'GET /api/ping → ok (' + ms + 'ms)');
-        sendJson(res, 200, { status: 'ok', ms, sample });
+        logReq('green', 'GET /api/ping → ok [' + provider.id + '] (' + ms + 'ms)');
+        sendJson(res, 200, { status: 'ok', ms, sample, provider: provider.id, model: resolved.publicId });
       });
       up.on('error', (err) => {
         const ms = Date.now() - started;
-        logReq('red', 'GET /api/ping → error: ' + err.message + ' (' + ms + 'ms)');
-        sendJson(res, 200, { status: 'error', ms, sample: String(err.message || err).slice(0, 200) });
+        logReq('red', 'GET /api/ping → error [' + provider.id + ']: ' + err.message + ' (' + ms + 'ms)');
+        sendJson(res, 200, {
+          status: 'error',
+          ms,
+          sample: String(err.message || err).slice(0, 200),
+          provider: provider.id,
+          model: resolved.publicId,
+        });
       });
     }
   );
@@ -2327,8 +2889,8 @@ function handlePing(res) {
   upReq.on('error', (err) => {
     const ms = Date.now() - started;
     const msg = (err && err.message) || String(err);
-    logReq('red', 'GET /api/ping → error: ' + msg + ' (' + ms + 'ms)');
-    sendJson(res, 200, { status: 'error', ms, sample: msg.slice(0, 200) });
+    logReq('red', 'GET /api/ping → error [' + provider.id + ']: ' + msg + ' (' + ms + 'ms)');
+    sendJson(res, 200, { status: 'error', ms, sample: msg.slice(0, 200), provider: provider.id, model: resolved.publicId });
   });
   upReq.write(body, 'utf8');
   upReq.end();
@@ -2396,9 +2958,13 @@ function readStreamText(stream, cap) {
 }
 
 /** پارسر SSE سمت سرور (همان منطق پارسر کلاینت) → دلتای {text, reasoning, error} */
-function makeUpstreamParser(onDelta) {
+function makeUpstreamParser(onDelta, opts) {
   let buf = '';
   let pendingJson = '';
+  /* فیلدهای سفارشیِ همان پروایدر (providers.json → response.textFields/reasoningFields/doneToken) */
+  const extraText = (opts && opts.extraTextFields) || [];
+  const extraReason = (opts && opts.extraReasoningFields) || [];
+  const doneToken = (opts && opts.doneToken) || '[DONE]';
 
   function applyObject(obj) {
     const out = { text: '', reasoning: '', error: null };
@@ -2446,6 +3012,22 @@ function makeUpstreamParser(onDelta) {
       /* فیلدهای مستقیم ریشه */
       addText(obj.content); addText(obj.text);
       addReason(obj.reasoning_content); addReason(obj.reasoning); addReason(obj.thinking);
+      /* فیلدهای سفارشی پروایدر — روی ریشه، delta، message و choices[0].delta/message */
+      if (extraText.length || extraReason.length) {
+        const scopes = [obj];
+        if (obj.delta && typeof obj.delta === 'object') scopes.push(obj.delta);
+        if (obj.message && typeof obj.message === 'object') scopes.push(obj.message);
+        const ch = Array.isArray(obj.choices) ? obj.choices[0] : undefined;
+        if (ch && typeof ch === 'object') {
+          scopes.push(ch);
+          if (ch.delta && typeof ch.delta === 'object') scopes.push(ch.delta);
+          if (ch.message && typeof ch.message === 'object') scopes.push(ch.message);
+        }
+        for (const s of scopes) {
+          for (const f of extraText) addText(s[f]);
+          for (const f of extraReason) addReason(s[f]);
+        }
+      }
       /* خطای داخل استریم */
       if (obj.error) {
         out.error = typeof obj.error === 'string'
@@ -2460,7 +3042,7 @@ function makeUpstreamParser(onDelta) {
 
   function handlePayload(p) {
     const t = p.trim();
-    if (!t || t === '[DONE]') return;
+    if (!t || t === '[DONE]' || t === doneToken) return;
     if (t.charAt(0) === '{' || t.charAt(0) === '[') {
       pendingJson = pendingJson ? pendingJson + '\n' + p : p;
       try {
@@ -2517,13 +3099,13 @@ function makeUpstreamParser(onDelta) {
 }
 
 /** تجمیع کامل بدنهٔ آپستریم (پاسخ غیراستریم) به متن/تفکر/خطا */
-function collectUpstreamText(full) {
+function collectUpstreamText(full, opts) {
   const acc = { text: '', reasoning: '', error: null };
   const p = makeUpstreamParser((d) => {
     acc.text += d.text;
     acc.reasoning += d.reasoning;
     if (d.error && !acc.error) acc.error = d.error;
-  });
+  }, opts);
   p.push(String(full || ''));
   p.end();
   if (!acc.text && !acc.reasoning && !acc.error) {
@@ -2541,16 +3123,20 @@ function handleModels(req, res) {
     openaiError(res, 401, 'کلید API نامعتبر است. کلید را از بنر اجرا یا بخش ⚙️ تنظیمات بگیرید.', 'invalid_api_key');
     return;
   }
-  sendJson(res, 200, {
-    object: 'list',
-    data: FM_MODELS.map((m) => ({
-      id: m.id,
-      object: 'model',
-      created: BOOT_AT,
-      owned_by: 'freemodels-' + m.vendor.toLowerCase().replace(/\s+/g, '-'),
-    })),
+  const cfg = getProviders();
+  const extra = new URL(String(req.url || '/'), 'http://localhost').searchParams.get('extra') === '1';
+  const data = listModels(cfg).map((m) => {
+    const base = { id: m.id, object: 'model', created: BOOT_AT, owned_by: ownedBy(m, cfg) };
+    if (extra) {
+      base.group = m.group;
+      base.vendor = m.vendor;
+      base.logo = m.logo;
+      base.provider = m.providerId;
+    }
+    return base;
   });
-  logReq('green', 'GET /v1/models → 200');
+  sendJson(res, 200, { object: 'list', data });
+  logReq('green', 'GET /v1/models → 200 (' + data.length + ' مدل)');
 }
 
 /* ---------- POST /v1/chat/completions — سازگار OpenAI ---------- */
@@ -2594,14 +3180,22 @@ async function handleOpenAI(req, res) {
       return;
     }
 
-    const model = resolveModelId(parsed.model);
+    /* پروایدر از روی مدل انتخاب می‌شود؛ بدنه در شکلِ همان آپستریم ساخته می‌شود */
+    const resolved = resolveModel(parsed.model);
+    const provider = resolved.provider;
+    const model = resolved.publicId;
     const wantStream = !!parsed.stream;
-    const payload = {
+    const payload = buildUpstreamPayload(provider, {
       messages: upstreamMsgs,
-      modelId: model,
+      modelId: resolved.id,
       thinking: parsed.thinking === true,      // اکستنشن غیراستاندارد (اختیاری)
       deepSearch: parsed.deep_search === true, // اکستنشن غیراستاندارد (اختیاری)
       stream: wantStream,
+    });
+    const parserOpts = {
+      extraTextFields: (provider.response && provider.response.textFields) || [],
+      extraReasoningFields: (provider.response && provider.response.reasoningFields) || [],
+      doneToken: provider.response && provider.response.doneToken,
     };
 
     const promptChars = upstreamMsgs.reduce((n, m) => n + m.content.length, 0);
@@ -2613,7 +3207,7 @@ async function handleOpenAI(req, res) {
     if (!wantStream) {
       let up;
       try {
-        up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS);
+        up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS, provider);
       } catch (err) {
         const msg = (err && err.message) || String(err);
         log('red', '✖ ' + msg);
@@ -2628,7 +3222,7 @@ async function handleOpenAI(req, res) {
         return;
       }
       const full = await readStreamText(up.res, 8 * 1024 * 1024);
-      const acc = collectUpstreamText(full);
+      const acc = collectUpstreamText(full, parserOpts);
       const content = acc.text || acc.reasoning || '⚠️ پاسخ خالی از سرور دریافت شد.';
       const estOut = Math.max(1, Math.ceil(content.length / 4));
       sendJson(res, 200, {
@@ -2685,8 +3279,11 @@ async function handleOpenAI(req, res) {
     };
     const endStream = () => {
       if (finished) return;
-      finished = true;
+      /* نکته: `finished` باید «بعد» از چانک پایان ست شود، وگرنه chunk() آن را
+         به‌خاطر گارد finished نمی‌فرستد و finish_reason:"stop" هرگز منتشر نمی‌شود
+         (باگ واقعی بود — با npm run smoke گرفته شد؛ نسخهٔ Next همین ترتیب را دارد) */
       chunk({}, 'stop');
+      finished = true;
       if (includeUsage) {
         const estOut = Math.max(1, Math.ceil(outChars / 4));
         try {
@@ -2718,11 +3315,11 @@ async function handleOpenAI(req, res) {
         outChars += d.text.length;
         chunk({ content: d.text });
       }
-    });
+    }, parserOpts);
 
     let up;
     try {
-      up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS);
+      up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS, provider);
     } catch (err) {
       chunk({ content: '⚠️ اتصال به سرویس چت برقرار نشد: ' + ((err && err.message) || err) });
       endStream();
@@ -2792,12 +3389,12 @@ async function handleAnthropic(req, res) {
       return;
     }
 
-    /* system (رشته یا بلوک) + messages → فرمت آپستریم */
+    /* system (رشته یا بلوک) — جدا نگه داشته می‌شود تا buildUpstreamPayload آن را
+       در شکلِ درستِ همان آپستریم بگذارد (freemodels: پیام system · anthropic: فیلد system) */
     const upstreamMsgs = [];
     let sysText = '';
     if (typeof parsed.system === 'string') sysText = parsed.system;
     else if (Array.isArray(parsed.system)) sysText = parsed.system.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('\n');
-    if (sysText.trim()) upstreamMsgs.push({ role: 'system', content: sysText.trim() });
 
     const msgsIn = Array.isArray(parsed.messages) ? parsed.messages : [];
     for (const m of msgsIn) {
@@ -2810,17 +3407,27 @@ async function handleAnthropic(req, res) {
       return;
     }
 
-    const model = resolveModelId(parsed.model);
+    /* پروایدر از روی مدل انتخاب می‌شود؛ بدنه در شکلِ همان آپستریم ساخته می‌شود */
+    const resolved = resolveModel(parsed.model);
+    const provider = resolved.provider;
+    const model = resolved.publicId;
     const wantStream = !!parsed.stream;
-    const payload = {
+    const payload = buildUpstreamPayload(provider, {
       messages: upstreamMsgs,
-      modelId: model,
+      modelId: resolved.id,
       thinking: parsed.thinking === true, // اکستنشن غیراستاندارد (اختیاری)
       deepSearch: false,
       stream: wantStream,
+      maxTokens: typeof parsed.max_tokens === 'number' ? parsed.max_tokens : undefined,
+      system: sysText,
+    });
+    const parserOpts = {
+      extraTextFields: (provider.response && provider.response.textFields) || [],
+      extraReasoningFields: (provider.response && provider.response.reasoningFields) || [],
+      doneToken: provider.response && provider.response.doneToken,
     };
 
-    const promptChars = upstreamMsgs.reduce((n, m) => n + m.content.length, 0);
+    const promptChars = upstreamMsgs.reduce((n, m) => n + m.content.length, 0) + sysText.trim().length;
     const estIn = Math.max(1, Math.ceil(promptChars / 4));
     const msgId = 'msg_' + crypto.randomBytes(10).toString('hex');
     const version = String(req.headers['anthropic-version'] || '2023-06-01');
@@ -2829,7 +3436,7 @@ async function handleAnthropic(req, res) {
     if (!wantStream) {
       let up;
       try {
-        up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS);
+        up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS, provider);
       } catch (err) {
         const msg = (err && err.message) || String(err);
         log('red', '✖ ' + msg);
@@ -2844,7 +3451,7 @@ async function handleAnthropic(req, res) {
         return;
       }
       const full = await readStreamText(up.res, 8 * 1024 * 1024);
-      const acc = collectUpstreamText(full);
+      const acc = collectUpstreamText(full, parserOpts);
       const blocks = [];
       if (acc.reasoning) blocks.push({ type: 'thinking', thinking: acc.reasoning });
       blocks.push({ type: 'text', text: acc.text || (acc.error ? '⚠️ ' + acc.error : '') });
@@ -2948,11 +3555,11 @@ async function handleAnthropic(req, res) {
         outChars += d.text.length;
         ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: d.text } });
       }
-    });
+    }, parserOpts);
 
     let up;
     try {
-      up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS);
+      up = await openUpstream(JSON.stringify(payload), UPSTREAM_TIMEOUT_MS, provider);
     } catch (err) {
       openBlock('text');
       ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: '⚠️ اتصال به سرویس چت برقرار نشد: ' + ((err && err.message) || err) } });
@@ -2991,7 +3598,9 @@ async function handleAnthropic(req, res) {
 
 /* ---------- سرور اصلی و مسیریابی ---------- */
 const PORT = parseInt(process.env.PORT || '3000', 10) || 3000;
-const HOST = '127.0.0.1';
+/* آدرس bind — پیش‌فرض فقط لوپ‌بک (امن برای اجرای روی ماشین شخصی).
+   برای دسترسی از بیرون/کانتینر/پیش‌نمایش:  HOST=0.0.0.0 node app.js  */
+const HOST = (process.env.HOST || '').trim() || '127.0.0.1';
 
 const server = http.createServer((req, res) => {
   const path = (req.url || '/').split('?')[0];
@@ -3028,9 +3637,21 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /* کاتالوگ زندهٔ مدل‌ها (برای پیکر مدل) */
+  if (req.method === 'GET' && path === '/api/models') {
+    handleCatalog(req, res);
+    return;
+  }
+
+  /* کلیدهای API (برای نمایش در تنظیمات) */
+  if (req.method === 'GET' && path === '/api/keys') {
+    handleKeys(req, res);
+    return;
+  }
+
   /* تست اتصال */
   if (req.method === 'GET' && path === '/api/ping') {
-    handlePing(res);
+    handlePing(req, res);
     return;
   }
 
@@ -3066,8 +3687,20 @@ server.listen(PORT, HOST, () => {
   console.log('  \x1b[1;36m⚡ چت هوشمند\x1b[0m — \x1b[1;37mنسخهٔ تک‌فایل Node.js\x1b[0m');
   console.log(C.dim + '└' + line + '┘' + C.reset);
   console.log('   \x1b[32m●\x1b[0m آدرس محلی : \x1b[1;34mhttp://127.0.0.1:' + PORT + '/\x1b[0m');
+  if (HOST !== '127.0.0.1' && HOST !== 'localhost') {
+    const nets = require('node:os').networkInterfaces();
+    const ips = [];
+    for (const name of Object.keys(nets)) {
+      for (const ni of nets[name] || []) {
+        if (ni.family === 'IPv4' && !ni.internal) ips.push(ni.address);
+      }
+    }
+    console.log('   \x1b[32m●\x1b[0m آدرس شبکه : \x1b[1;34mhttp://' + (HOST === '0.0.0.0' ? (ips[0] || '<ip>') : HOST) + ':' + PORT + '/\x1b[0m' + C.dim + '  (bind: ' + HOST + ')' + C.reset);
+  }
   console.log('   \x1b[32m●\x1b[0m پورت      : \x1b[33m' + PORT + '\x1b[0m \x1b[2m(متغیر محیطی PORT)\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m آپستریم   : \x1b[2m' + UPSTREAM_URL + '\x1b[0m');
+  console.log('   \x1b[32m●\x1b[0m پروایدرها : \x1b[2m' + providersSummary() + '\x1b[0m');
+  console.log('   \x1b[32m●\x1b[0m رجیستری   : \x1b[2m' + PROVIDERS_FILE + '\x1b[0m \x1b[2m(hot reload)\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m مدل‌ها     : \x1b[2m' + FM_MODELS.map((m) => m.id).join(' · ') + '\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m OpenAI API: \x1b[1;34mPOST /v1/chat/completions\x1b[0m \x1b[2m| GET /v1/models\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m Anthropic : \x1b[1;34mPOST /v1/messages\x1b[0m \x1b[2m(سازگار SDK آنتروپیک)\x1b[0m');

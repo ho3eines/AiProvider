@@ -1,0 +1,156 @@
+{
+  "$schema": "./docs/providers.schema.json",
+  "version": 1,
+  "defaults": {
+    "providerId": "freemodels",
+    "modelId": "claude-fable-5.1",
+    "timeoutMs": 180000,
+    "maxBodyBytes": 5242880
+  },
+  "providers": [
+    {
+      "id": "freemodels",
+      "name": "freemodels",
+      "site": "https://freemodels.pro",
+      "enabled": true,
+      "ownedByPrefix": "freemodels",
+      "upstream": {
+        "url": "https://freemodels-chat.freemodels.workers.dev/",
+        "method": "POST",
+        "timeoutMs": 180000,
+        "maxBodyBytes": 5242880,
+        "headers": {
+          "Content-Type": "application/json",
+          "Origin": "https://freemodels.pro",
+          "Referer": "https://freemodels.pro/",
+          "Accept": "*/*",
+          "Accept-Language": "en-US,en;q=0.9",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+          "sec-ch-ua": "\"Chromium\";v=\"152\", \"Not?A_Brand\";v=\"24\"",
+          "sec-ch-ua-mobile": "?0",
+          "sec-ch-ua-platform": "\"Windows\"",
+          "sec-fetch-dest": "empty",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "cross-site",
+          "Accept-Encoding": "identity"
+        },
+        "auth": null
+      },
+      "request": {
+        "shape": "freemodels",
+        "passthrough": true,
+        "fields": {
+          "model": "modelId",
+          "messages": "messages",
+          "stream": "stream",
+          "thinking": "thinking",
+          "deepSearch": "deepSearch"
+        },
+        "constants": {}
+      },
+      "response": {
+        "profile": "universal"
+      },
+      "groups": [
+        { "title": "Claude Pro", "icon": "sparkles" },
+        { "title": "ChatGPT Pro", "icon": "zap" },
+        { "title": "Other Pro Models", "icon": "globe" }
+      ],
+      "models": [
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+          "vendor": "Anthropic",
+          "group": "Claude Pro",
+          "logo": "/Claude-ai-logo.webp"
+        },
+        {
+          "id": "claude-fable-5",
+          "name": "Claude Fable 5",
+          "vendor": "Anthropic",
+          "group": "Claude Pro",
+          "logo": "/Claude-ai-logo.webp"
+        },
+        {
+          "id": "claude-fable-5.1",
+          "name": "Claude Fable 5.1",
+          "vendor": "Anthropic",
+          "group": "Claude Pro",
+          "logo": "/Claude-ai-logo.webp",
+          "default": true
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "name": "GPT 5.6 Sol",
+          "vendor": "OpenAI",
+          "group": "ChatGPT Pro",
+          "logo": "/ChatGPT-Logo.svg.webp"
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "name": "GPT 5.6 Terra",
+          "vendor": "OpenAI",
+          "group": "ChatGPT Pro",
+          "logo": "/ChatGPT-Logo.svg.webp"
+        },
+        {
+          "id": "glm-5.2",
+          "name": "GLM 5.2",
+          "vendor": "Z.AI",
+          "group": "Other Pro Models",
+          "logo": "/zai.png"
+        },
+        {
+          "id": "kimi-k3",
+          "name": "Kimi K3",
+          "vendor": "Moonshot AI",
+          "group": "Other Pro Models",
+          "logo": "/kimi-logo-png_seeklogo-611650.png"
+        }
+      ]
+    },
+    {
+      "id": "mock",
+      "name": "Mock (local test)",
+      "site": "http://127.0.0.1:4100",
+      "enabled": false,
+      "ownedByPrefix": "mock",
+      "upstream": {
+        "url": "http://127.0.0.1:${MOCK_PORT:-4100}/chat",
+        "method": "POST",
+        "timeoutMs": 30000,
+        "maxBodyBytes": 5242880,
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "*/*"
+        },
+        "auth": null
+      },
+      "request": {
+        "shape": "openai",
+        "passthrough": false,
+        "fields": {
+          "model": "model",
+          "messages": "messages",
+          "stream": "stream"
+        },
+        "constants": {}
+      },
+      "response": {
+        "profile": "universal"
+      },
+      "groups": [
+        { "title": "Local Mock", "icon": "flask" }
+      ],
+      "models": [
+        {
+          "id": "mock-echo",
+          "name": "Mock Echo",
+          "vendor": "Local",
+          "group": "Local Mock",
+          "logo": "/logo.svg"
+        }
+      ]
+    }
+  ]
+}

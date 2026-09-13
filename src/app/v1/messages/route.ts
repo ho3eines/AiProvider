@@ -8,9 +8,10 @@
  */
 import { randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { openUpstream, UPSTREAM_TIMEOUT_MS } from '@/lib/upstream';
+import { openUpstreamFor, UPSTREAM_TIMEOUT_MS } from '@/lib/upstream';
 import { createSseParser } from '@/lib/sse';
-import { resolveModelId } from '@/lib/models';
+import { getProvidersConfig } from '@/lib/providers';
+import { buildUpstreamPayload, resolveModel } from '@/lib/catalog';
 import { bearerFrom, getApiKeys, keyIsValid } from '@/lib/apikeys';
 import { estTokens, flattenContent, readAll, SSE_HEADERS, V1_CORS } from '@/lib/v1';
 
@@ -46,7 +47,8 @@ export async function POST(req: NextRequest) {
     return jsonError(400, 'invalid_request_error', 'max_tokens: Field required');
   }
 
-  /* system (رشته یا بلوک) + messages → فرمت آپستریم */
+  /* system (رشته یا آرایهٔ بلوک) — جدا نگه داشته می‌شود تا buildUpstreamPayload
+     آن را در شکلِ درستِ همان آپستریم بگذارد (freemodels: پیام system · anthropic: فیلد system) */
   const upstreamMsgs: { role: string; content: string }[] = [];
   let sysText = '';
   if (typeof parsed.system === 'string') sysText = parsed.system;
@@ -55,7 +57,6 @@ export async function POST(req: NextRequest) {
       .map((b) => (b && typeof b.text === 'string' ? b.text : ''))
       .join('\n');
   }
-  if (sysText.trim()) upstreamMsgs.push({ role: 'system', content: sysText.trim() });
 
   const msgsIn = Array.isArray(parsed.messages) ? (parsed.messages as Record<string, unknown>[]) : [];
   for (const m of msgsIn) {
@@ -67,23 +68,36 @@ export async function POST(req: NextRequest) {
     return jsonError(400, 'invalid_request_error', 'messages: at least one message is required');
   }
 
-  const model = resolveModelId(parsed.model);
+  /* پروایدر از روی مدل انتخاب می‌شود؛ بدنه در شکلِ همان آپستریم ساخته می‌شود */
+  const cfg = getProvidersConfig();
+  const resolved = resolveModel(parsed.model, cfg);
+  const provider = resolved.provider;
+  const model = resolved.publicId;
   const wantStream = parsed.stream === true;
-  const payload = JSON.stringify({
-    messages: upstreamMsgs,
-    modelId: model,
-    thinking: parsed.thinking === true, // اکستنشن غیراستاندارد (اختیاری)
-    deepSearch: false,
-    stream: wantStream,
-  });
+  const payload = JSON.stringify(
+    buildUpstreamPayload(provider, {
+      messages: upstreamMsgs,
+      modelId: resolved.id,
+      thinking: parsed.thinking === true, // اکستنشن غیراستاندارد (اختیاری)
+      deepSearch: false,
+      stream: wantStream,
+      maxTokens: typeof parsed.max_tokens === 'number' ? parsed.max_tokens : undefined,
+      system: sysText,
+    })
+  );
+  const parserOpts = {
+    extraTextFields: provider.response?.textFields,
+    extraReasoningFields: provider.response?.reasoningFields,
+    doneToken: provider.response?.doneToken,
+  };
 
   const msgId = 'msg_' + randomBytes(10).toString('hex');
-  const estIn = estTokens(upstreamMsgs.reduce((n, m) => n + m.content.length, 0));
+  const estIn = estTokens(upstreamMsgs.reduce((n, m) => n + m.content.length, 0) + sysText.length);
 
   /* اتصال به آپستریم */
   let up;
   try {
-    up = await openUpstream(payload, UPSTREAM_TIMEOUT_MS);
+    up = await openUpstreamFor(provider, payload, UPSTREAM_TIMEOUT_MS);
   } catch (err) {
     const msg = (err as Error)?.message || String(err);
     return jsonError(/timeout/i.test(msg) ? 504 : 502, 'api_error', 'اتصال به سرویس چت برقرار نشد: ' + msg);
@@ -103,6 +117,7 @@ export async function POST(req: NextRequest) {
     const full = await readAll(up.res);
     const acc = { text: '', reasoning: '', error: '' };
     const parser = createSseParser({
+      ...parserOpts,
       onEvent: (ev) => {
         acc.text += ev.text;
         acc.reasoning += ev.reasoning;
@@ -201,6 +216,7 @@ export async function POST(req: NextRequest) {
       ev('ping', { type: 'ping' });
 
       const parser = createSseParser({
+        ...parserOpts,
         onEvent: (event) => {
           if (event.error) {
             openBlock('text');

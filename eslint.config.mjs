@@ -18,6 +18,9 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     
     // React rules
     "react-hooks/exhaustive-deps": "off",
+    // setState داخل effect اینجا عمدی است (بارگذاری localStorage بعد از mount برای جلوگیری از
+    // hydration mismatch) — همان الگویی که در shadcn/ui هم هست.
+    "react-hooks/set-state-in-effect": "off",
     "react-hooks/purity": "off",
     "react/no-unescaped-entities": "off",
     "react/display-name": "off",

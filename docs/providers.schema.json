@@ -1,0 +1,281 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ho3eines/AiProvider/blob/main/docs/providers.schema.json",
+  "title": "AiProvider — Provider Registry",
+  "description": "رجیستری پروایدرها و مدل‌ها. منبع حقیقتِ یکتا برای هر دو نسخهٔ اپ (Next.js در src/ و تک‌فایل app.js). برای افزودن مدل/پروایدر/سایت جدید فقط همین فایل را ویرایش کنید — skills/add-model و skills/add-provider را ببینید.",
+  "type": "object",
+  "required": ["providers"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "مسیر همین اسکیمای JSON (برای اعتبارسنجی در ویرایشگر)"
+    },
+    "version": {
+      "type": "integer",
+      "description": "نسخهٔ ساختار رجیستری (اکنون: ۱)",
+      "enum": [1]
+    },
+    "defaults": {
+      "type": "object",
+      "description": "پیش‌فرض‌های سراسری — وقتی مدل/پروایدر مشخص نشود از اینها استفاده می‌شود",
+      "additionalProperties": false,
+      "properties": {
+        "providerId": {
+          "type": "string",
+          "description": "پروایدر پیش‌فرض (اگر پیدا نشود، اولین پروایدر فعال)"
+        },
+        "modelId": {
+          "type": "string",
+          "description": "مدل پیش‌فرض اپ و API — معمولاً روی یکی از مدل‌ها `\"default\": true` می‌گذارند"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "ضرب‌العجل پیش‌فرض اتصال به آپستریم (میلی‌ثانیه) — پیش‌فرض ۱۸۰۰۰۰"
+        },
+        "maxBodyBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "description": "بزرگ‌ترین بدنهٔ پذیرفته‌شده (بایت) — پیش‌فرض ۵ مگابایت؛ بزرگ‌تر ← 413"
+        }
+      }
+    },
+    "providers": {
+      "type": "array",
+      "minItems": 1,
+      "description": "فهرست پروایدرها (سایت‌های آپستریم). ترتیب = ترتیب نمایش گروه‌ها در پیکر مدل.",
+      "items": { "$ref": "#/definitions/provider" }
+    }
+  },
+  "definitions": {
+    "provider": {
+      "type": "object",
+      "required": ["id", "upstream", "models"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "description": "شناسهٔ یکتای پروایدر (لاتین، بدون فاصله). در لاگ‌ها و خطاها دیده می‌شود."
+        },
+        "name": {
+          "type": "string",
+          "description": "نام نمایشی (در بنر راه‌اندازی و مستندات)"
+        },
+        "site": {
+          "type": "string",
+          "description": "آدرس سایتِ پروایدر — فقط برای نمایش/مستندات؛ درخواست‌ها به upstream.url می‌روند"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "false ← مدل‌های این پروایدر نه در UI/API دیده می‌شوند نه قابل استفاده‌اند (اما در فایل می‌مانند)"
+        },
+        "ownedByPrefix": {
+          "type": "string",
+          "description": "پیشوند فیلد owned_by در /v1/models → «<prefix>-<vendor-slug>». پیش‌فرض: id پروایدر"
+        },
+        "upstream": { "$ref": "#/definitions/upstream" },
+        "request": { "$ref": "#/definitions/request" },
+        "response": { "$ref": "#/definitions/response" },
+        "groups": {
+          "type": "array",
+          "description": "گروه‌های پیکر مدل این پروایدر (به‌همراه آیکن). ترتیب همین‌جا = ترتیب نمایش.",
+          "items": { "$ref": "#/definitions/group" }
+        },
+        "models": {
+          "type": "array",
+          "minItems": 1,
+          "description": "مدل‌های این پروایدر — ترتیب = ترتیب نمایش در پیکر مدل",
+          "items": { "$ref": "#/definitions/model" }
+        }
+      }
+    },
+    "upstream": {
+      "type": "object",
+      "required": ["url"],
+      "additionalProperties": false,
+      "description": "چگونه به سایت بالادستی وصل شویم",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "آدرس کامل endpoint چت. از `${VAR}` و `${VAR:-default}` برای خواندن از محیط پشتیبانی می‌شود."
+        },
+        "method": {
+          "type": "string",
+          "enum": ["POST", "PUT", "PATCH", "GET"],
+          "default": "POST"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "ضرب‌العجل این پروایدر (میلی‌ثانیه)"
+        },
+        "maxBodyBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "description": "سقف بدنهٔ ورودی برای این پروایدر (بایت)"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "هدرهای ارسالی به آپستریم (مثلاً Origin/Referer/User-Agent برای عبور از بررسی مرورگر). مقادیر از `${VAR}` پشتیبانی می‌کنند."
+        },
+        "auth": {
+          "description": "احراز هویت آپستریم (نه کلیدهای /v1 خودمان). null ← بدون احراز هویت.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "header": {
+                  "type": "string",
+                  "description": "نام هدر، مثلاً Authorization یا x-api-key"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "مقدار هدر؛ کلید را از env بخوانید: \"Bearer ${MY_UPSTREAM_KEY}\""
+                },
+                "env": {
+                  "type": "string",
+                  "description": "میان‌بر: نام متغیر محیطی (معادل header + value با prefix)"
+                },
+                "prefix": {
+                  "type": "string",
+                  "description": "پیشوند مقدار (پیش‌فرض در حالت env: «Bearer »)"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "چگونه بدنهٔ درخواست آپستریم ساخته شود",
+      "properties": {
+        "shape": {
+          "type": "string",
+          "enum": ["freemodels", "openai", "anthropic", "passthrough"],
+          "default": "openai",
+          "description": "قالب پیش‌فرض نگاشت فیلدها. freemodels: modelId/thinking/deepSearch · openai: model/messages/stream · anthropic: + system/max_tokens · passthrough: بدنهٔ ورودی تقریباً دست‌نخورده"
+        },
+        "passthrough": {
+          "type": "boolean",
+          "default": false,
+          "description": "true ← کلیدهای ناشناختهٔ بدنهٔ ورودی هم به آپستریم پاس داده می‌شوند"
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "نگاشت فیلد نرمال‌شده → نام فیلد در آپستریم",
+          "properties": {
+            "model": { "type": "string" },
+            "messages": { "type": "string" },
+            "stream": { "type": "string" },
+            "thinking": { "type": "string" },
+            "deepSearch": { "type": "string" },
+            "maxTokens": { "type": "string" },
+            "system": { "type": "string" }
+          }
+        },
+        "constants": {
+          "type": "object",
+          "description": "فیلدهای ثابتی که همیشه به بدنه اضافه می‌شوند (مثلاً {\"api_version\": \"v2\"})",
+          "additionalProperties": true
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "چگونه پاسخ/استریم آپستریم خوانده شود",
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": ["universal"],
+          "default": "universal",
+          "description": "پارسر جهان‌شمول: SSE سبک OpenAI، سبک Claude (content_block_delta)، JSON معمولی و متن خام را می‌فهمد"
+        },
+        "textFields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "نام فیلدهای متنیِ مخصوص این آپستریم که پارسر باید بخواند (مثلاً [\"output\", \"text\"])"
+        },
+        "reasoningFields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "نام فیلدهای «تفکر» مخصوص این آپستریم (مثلاً [\"thought\", \"reasoning\"])"
+        },
+        "doneToken": {
+          "type": "string",
+          "description": "نشانهٔ پایان استریم — پیش‌فرض «[DONE]»"
+        }
+      }
+    },
+    "group": {
+      "type": "object",
+      "required": ["title"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "عنوان گروه در پیکر مدل — باید با فیلد group مدل‌ها یکی باشد"
+        },
+        "icon": {
+          "type": "string",
+          "enum": ["sparkles", "zap", "globe", "flask", "bot", "brain"],
+          "default": "globe",
+          "description": "نام آیکن گروه (آیکن ناشناخته ← globe)"
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["id", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "شناسهٔ عمومی مدل (همین مقدار در /v1/models و UI نشان داده می‌شود و کلاینت می‌فرستد). یکتا در کل رجیستری."
+        },
+        "name": {
+          "type": "string",
+          "description": "نام نمایشی در پیکر مدل"
+        },
+        "vendor": {
+          "type": "string",
+          "description": "سازنده (برای owned_by و زیرنویس UI)، مثلاً «Anthropic» یا «Moonshot AI»"
+        },
+        "group": {
+          "type": "string",
+          "description": "عنوان گروه (باید در groups همین پروایدر تعریف شده باشد؛ وگرنه گروه «Other» ساخته می‌شود)"
+        },
+        "logo": {
+          "type": "string",
+          "description": "مسیر لوگو: «/foo.webp» از پوشهٔ public (در app.js از EMBEDDED_LOGOS) یا یک URL کامل https://…"
+        },
+        "upstreamId": {
+          "type": "string",
+          "description": "اگر آپستریم مدل را با نام دیگری می‌شناسد (پیش‌فرض: همان id)"
+        },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "نام‌های جایگزینی که resolveModel می‌پذیرد (بدون حساسیت به بزرگی/کوچکی و فاصله)"
+        },
+        "default": {
+          "type": "boolean",
+          "description": "true ← مدل پیش‌فرض اپ/API (فقط یکی در کل رجیستری)"
+        },
+        "description": {
+          "type": "string",
+          "description": "توضیح کوتاه (اختیاری — فعلاً فقط در مستندات)"
+        }
+      }
+    }
+  }
+}

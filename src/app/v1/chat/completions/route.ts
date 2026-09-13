@@ -7,9 +7,10 @@
  */
 import { randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { openUpstream, UPSTREAM_TIMEOUT_MS } from '@/lib/upstream';
+import { openUpstreamFor, UPSTREAM_TIMEOUT_MS } from '@/lib/upstream';
 import { createSseParser } from '@/lib/sse';
-import { resolveModelId } from '@/lib/models';
+import { getProvidersConfig } from '@/lib/providers';
+import { buildUpstreamPayload, resolveModel } from '@/lib/catalog';
 import { bearerFrom, getApiKeys, keyIsValid } from '@/lib/apikeys';
 import { estTokens, flattenContent, readAll, SSE_HEADERS, V1_CORS } from '@/lib/v1';
 
@@ -59,15 +60,27 @@ export async function POST(req: NextRequest) {
     return jsonError(400, 'messages باید آرایه‌ای غیرخالی از پیام‌ها باشد.');
   }
 
-  const model = resolveModelId(typeof parsed.model === 'string' ? parsed.model : null);
+  /* پروایدر از روی مدل انتخاب می‌شود؛ بدنه در شکلِ مورد انتظارِ همان آپستریم ساخته می‌شود */
+  const cfg = getProvidersConfig();
+  const resolved = resolveModel(typeof parsed.model === 'string' ? parsed.model : null, cfg);
+  const provider = resolved.provider;
+  const model = resolved.publicId;
   const wantStream = parsed.stream === true;
-  const payload = JSON.stringify({
-    messages: upstreamMsgs,
-    modelId: model,
-    thinking: parsed.thinking === true, // اکستنشن غیراستاندارد (اختیاری)
-    deepSearch: parsed.deep_search === true, // اکستنشن غیراستاندارد (اختیاری)
-    stream: wantStream,
-  });
+  const payload = JSON.stringify(
+    buildUpstreamPayload(provider, {
+      messages: upstreamMsgs,
+      modelId: resolved.id,
+      thinking: parsed.thinking === true, // اکستنشن غیراستاندارد (اختیاری)
+      deepSearch: parsed.deep_search === true, // اکستنشن غیراستاندارد (اختیاری)
+      stream: wantStream,
+    })
+  );
+  /* تنظیمات پارسر مخصوص همین پروایدر (فیلدهای سفارشی آپستریم) */
+  const parserOpts = {
+    extraTextFields: provider.response?.textFields,
+    extraReasoningFields: provider.response?.reasoningFields,
+    doneToken: provider.response?.doneToken,
+  };
 
   const id = 'chatcmpl-' + randomBytes(10).toString('hex');
   const created = Math.floor(Date.now() / 1000);
@@ -76,7 +89,7 @@ export async function POST(req: NextRequest) {
   /* اتصال به آپستریم */
   let up;
   try {
-    up = await openUpstream(payload, UPSTREAM_TIMEOUT_MS);
+    up = await openUpstreamFor(provider, payload, UPSTREAM_TIMEOUT_MS);
   } catch (err) {
     const msg = (err as Error)?.message || String(err);
     return jsonError(/timeout/i.test(msg) ? 504 : 502, 'اتصال به سرویس چت برقرار نشد: ' + msg);
@@ -92,6 +105,7 @@ export async function POST(req: NextRequest) {
     const full = await readAll(up.res);
     const acc = { text: '', reasoning: '', error: '' };
     const parser = createSseParser({
+      ...parserOpts,
       onEvent: (ev) => {
         acc.text += ev.text;
         acc.reasoning += ev.reasoning;
@@ -181,6 +195,7 @@ export async function POST(req: NextRequest) {
       };
 
       const parser = createSseParser({
+        ...parserOpts,
         onEvent: (ev) => {
           if (ev.error) {
             chunk({ content: '\n\n⚠️ ' + ev.error });

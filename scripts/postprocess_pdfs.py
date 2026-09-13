@@ -2,17 +2,20 @@
 """Post-process Smart Chat PDFs: page numbers (cover hidden, body starts at 1),
 metadata, and U+FFFD text scan. Per pdf skill pagination.md + content rules.
 Usage: python3 postprocess_pdfs.py [name_filter]   e.g. AIGUIDE"""
+import os
 import sys
 import pymupdf
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 DOCS = [
-    ("/home/z/my-project/download/docs/SmartChat-README.pdf",
+    (os.path.join(ROOT, "download/docs/SmartChat-README.pdf"),
      "چت هوشمند — Project Documentation | مستندات کامل پروژه",
      "Complete bilingual project documentation: architecture, requirements, install & run, features, API reference, models, history, roadmap"),
-    ("/home/z/my-project/download/docs/SmartChat-HANDOFF.pdf",
+    (os.path.join(ROOT, "download/docs/SmartChat-HANDOFF.pdf"),
      "چت هوشمند — Project Handoff | سند تحویل پروژه",
      "Developer onboarding brief: quick start, critical gotchas, contract, verification checklist, task history, next steps"),
-    ("/home/z/my-project/download/docs/SmartChat-AIGUIDE.pdf",
+    (os.path.join(ROOT, "download/docs/SmartChat-AIGUIDE.pdf"),
      "چت هوشمند — AI Development Guide | راهنمای توسعه هوش مصنوعی",
      "AI layer reference: model catalog, upstream transport, universal SSE parser, OpenAI & Anthropic compatible API, keys, errors, playbook"),
 ]

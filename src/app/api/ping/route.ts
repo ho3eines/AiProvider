@@ -1,75 +1,98 @@
 /**
  * GET /api/ping — تست اتصال به آپستریم
  * یک درخواست سبک (stream:false، پیام "ping") می‌فرستد و {status, ms, sample} برمی‌گرداند.
+ *
+ * `GET /api/ping?model=kimi-k3` ← تست همان پروایدر/مدل (برای دیباگ چندسایتی).
  */
 import { NextResponse } from 'next/server';
-import { request as httpsRequest } from 'node:https';
-import { UPSTREAM_URL, SPOOFED_HEADERS, logReq, OPEN_CORS } from '@/lib/upstream';
+import { logReq, OPEN_CORS, openUpstreamRequest } from '@/lib/upstream';
+import { getProvidersConfig } from '@/lib/providers';
+import { buildUpstreamPayload, resolveModel } from '@/lib/catalog';
+import { createSseParser } from '@/lib/sse';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const PING_TIMEOUT_MS = 20_000;
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: OPEN_CORS });
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const started = Date.now();
-  const body = JSON.stringify({
-    messages: [{ role: 'user', content: 'ping' }],
-    modelId: 'claude-fable-5.1',
-    thinking: false,
-    deepSearch: false,
-    stream: false,
-  });
+  const cfg = getProvidersConfig();
+  const wantModel = new URL(req.url).searchParams.get('model');
+  const resolved = resolveModel(wantModel, cfg);
+  const provider = resolved.provider;
+
+  const body = JSON.stringify(
+    buildUpstreamPayload(provider, {
+      messages: [{ role: 'user', content: 'ping' }],
+      modelId: resolved.id,
+      thinking: false,
+      deepSearch: false,
+      stream: false,
+    })
+  );
 
   try {
-    const text = await new Promise<string>((resolve, reject) => {
-      const upReq = httpsRequest(
-        UPSTREAM_URL,
-        {
-          method: 'POST',
-          headers: { ...SPOOFED_HEADERS, 'Content-Length': String(Buffer.byteLength(body, 'utf8')) },
-        },
-        (res) => {
-          let data = '';
-          res.on('data', (c: Buffer) => {
-            if (data.length < 200_000) data += c.toString('utf8');
-          });
-          res.on('end', () => resolve(data));
-          res.on('error', reject);
-        }
-      );
-      upReq.setTimeout(20_000, () => upReq.destroy(new Error('timeout')));
-      upReq.on('error', reject);
-      upReq.write(body, 'utf8');
-      upReq.end();
+    const up = await openUpstreamRequest({ provider, body, timeoutMs: PING_TIMEOUT_MS, label: 'GET /api/ping' });
+    let data = '';
+    await new Promise<void>((resolve) => {
+      up.res.on('data', (c: Buffer) => {
+        if (data.length < 200_000) data += c.toString('utf8');
+      });
+      up.res.on('end', () => resolve());
+      up.res.on('error', () => resolve());
     });
+    up.req.destroy();
 
     const ms = Date.now() - started;
-    let sample = text.slice(0, 200);
-    try {
-      const j = JSON.parse(text) as Record<string, unknown>;
-      if (j && typeof j === 'object' && 'error' in j) {
-        const er = j.error as Record<string, unknown> | string;
-        sample = typeof er === 'string' ? er : String((er as Record<string, unknown>)?.message ?? JSON.stringify(er));
-      } else if (typeof j?.content === 'string') sample = j.content;
-      else if (typeof j?.text === 'string') sample = j.text;
-      else if (j && Array.isArray((j as Record<string, unknown>).choices)) {
-        const c = (j as Record<string, any>).choices?.[0];
-        if (typeof c?.message?.content === 'string') sample = c.message.content;
+
+    /* نمونهٔ پاسخ: ابتدا پارسر جهانی (متن/تفکر)، در نبود آن JSON خام، و در نهایت متن خام */
+    let sample = '';
+    const acc = { text: '', reasoning: '', error: '' };
+    const parser = createSseParser({
+      onEvent: (ev) => {
+        acc.text += ev.text;
+        acc.reasoning += ev.reasoning;
+        if (ev.error && !acc.error) acc.error = ev.error;
+      },
+      extraTextFields: provider.response?.textFields,
+      extraReasoningFields: provider.response?.reasoningFields,
+      doneToken: provider.response?.doneToken,
+    });
+    parser.feed(data);
+    parser.end();
+    sample = acc.error ? '⚠️ ' + acc.error : acc.text || acc.reasoning;
+
+    if (!sample) {
+      sample = data.slice(0, 200);
+      try {
+        const j = JSON.parse(data) as Record<string, unknown>;
+        if (j && typeof j === 'object' && 'error' in j) {
+          const er = j.error as Record<string, unknown> | string;
+          sample = typeof er === 'string' ? er : String((er as Record<string, unknown>)?.message ?? JSON.stringify(er));
+        }
+      } catch {
+        /* پاسخ JSON نبود — همان متن خام */
       }
-    } catch {
-      /* پاسخ JSON نبود — همان متن خام */
     }
     sample = sample.slice(0, 200);
 
-    logReq('green', `GET /api/ping → ok (${ms}ms)`);
-    return NextResponse.json({ status: 'ok', ms, sample }, { headers: OPEN_CORS });
+    logReq('green', `GET /api/ping → ok [${provider.id}] (${ms}ms)`);
+    return NextResponse.json(
+      { status: 'ok', ms, sample, provider: provider.id, model: resolved.publicId },
+      { headers: OPEN_CORS }
+    );
   } catch (e) {
     const ms = Date.now() - started;
     const msg = (e as Error)?.message || String(e);
-    logReq('red', `GET /api/ping → error: ${msg} (${ms}ms)`);
-    return NextResponse.json({ status: 'error', ms, sample: msg.slice(0, 200) }, { headers: OPEN_CORS });
+    logReq('red', `GET /api/ping → error [${provider.id}]: ${msg} (${ms}ms)`);
+    return NextResponse.json(
+      { status: 'error', ms, sample: msg.slice(0, 200), provider: provider.id, model: resolved.publicId },
+      { headers: OPEN_CORS }
+    );
   }
 }

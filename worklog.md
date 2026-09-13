@@ -198,3 +198,26 @@ Stage Summary:
 - تحویل‌دادنی‌ها: AI-GUIDE.md (ریشه پروژه + download/) · download/docs/SmartChat-AIGUIDE.html (منبع) · SmartChat-AIGUIDE.pdf (۱۰ صفحه، ~281KB، برداری، Vazirmatn embed، شماره صفحه + متادیتا)
 - سند چهارم مجموعهٔ مستندات پروژه شد (README / HANDOFF / AI-GUIDE / worklog)؛ کلیدهای واقعی API طبق الگوی اسناد قبلی درج شد
 - known-issue ثابت: هشدارهای bidi استخراج متن RTL در pdf_qa غیرمسدودکننده‌اند (تأیید بصری)
+
+---
+Task ID: 10
+Agent: Arena.ai Agent Mode (branch arena/01a09c0c-aiprovider)
+Task: بررسی عمیق پروژه + اصلاح README + ساخت «مهارت‌ها» (اسکیل‌ها) برای تغییرپذیری آسان — افزودن پروایدر/مدل جدید و اتصال به سایت‌های دیگر
+
+Work Log:
+- بررسی عمیق هر دو نسخه (src/ و app.js) و استخراج فهرست دقیق مدل‌ها/مسیرها/ثابت‌ها از روی کد (نه از سند کهنه)
+- طراحی و پیاده‌سازی معماری رجیستری‌محور: providers.json به‌عنوان منبع یکتای پروایدرها/آپستریم‌ها/گروه‌ها/مدل‌ها + docs/providers.schema.json (اسکیمای JSON با توضیح فارسی هر فیلد)
+- src/lib/catalog.ts (لایهٔ ایزومورفیک: expandVars، resolveModel، buildUpstreamPayload، upstreamOptions، publicCatalog، withEnvToggles) + src/lib/providers.ts (خواندن زنده با hot reload یک‌ثانیه‌ای بر اساس mtime) + بازنویسی upstream.ts/models.ts و همهٔ routeها برای استفاده از رجیستری
+- آینه‌سازی کامل در app.js: BUILTIN_PROVIDERS (کپی داخلی)، readProvidersConfig/getProviders/withEnvToggles، resolveModel/buildUpstreamPayload/publicCatalog زنده، جای‌گذاری __SERVER_DATA_JSON__ در هر درخواست، MODELS_FALLBACK و MP_ICON_SVG در PAGE_JS
+- افزودن GET /api/models به هر دو نسخه (کاتالوگ عمومی بدون نشت url/هدر/auth) و تغییر page.tsx به گرفتن کاتالوگ زنده بعد از mount؛ افزودن GET /api/keys به app.js برای برابری سطح API؛ افزودن آیکن brain به app.js برای برابری نام آیکن‌ها
+- رفع اشکال واقعی: endStream در handleOpenAI پرچم finished را پیش از ارسال چانک می‌ست کرد، پس finish_reason هرگز به کلاینت نمی‌رسید (اکنون اول چانک، بعد پرچم)؛ رفع TDZ با جابه‌جایی بلوک لاگ بالاتر از رجیستری؛ پشتیبانی HOST در app.js (پیش‌فرض لوپ‌بک، با bind شبکه و چاپ آدرس شبکه در بنر)
+- ابزار کیفیت: scripts/verify.mjs (اعتبارسنجی رجیستری با اسکیمای JSON، یکتایی idها، نبودِ کلید لفظی، node --check app.js + استخراج و چک جداگانهٔ PAGE_JS/PAGE_CSS، توکن‌های ممنوعهٔ String.raw، برابری BUILTIN_PROVIDERS و MODELS_FALLBACK، مسیرهای روتر، برابری نام آیکن‌ها، نبودِ لیست موازی در src/، سلامت و همگامی اسناد، اعتبار مسیرها/فرمان‌های npm/پیوندهای مستندات) · scripts/smoke.mjs (۳۰ آزمون end-to-end بدون اینترنت) · scripts/mock-upstream.mjs (آپستریم ساختگی با شکل‌های openai/claude/custom و خطای قابل درخواست) · scripts/lib/test-config.mjs (شش پروایدر آزمایشی مشترک) · scripts/dev-mock.mjs (محیط توسعهٔ آفلاین) · scripts/docs-sync.mjs (۱۱ بلوک GENERATED + کپی download/) · scripts/sync-builtin.mjs (بازسازی کپی رجیستری در app.js) · scripts/embed-logos.mjs (جاسازی base64 لوگوها)
+- پاک‌سازی: حذف scripts/embed_logos.py مرده (مسیرهای سخت‌کدشدهٔ سندباکس قدیم)، حذف src/app/api/route.ts قالبی («Hello, world!»)، نسبی‌کردن مسیرهای scripts/postprocess_pdfs.py، افزودن allowedDevOrigins به next.config.ts برای پیش‌نمایش پشت پروکسی
+- ساخت پوشهٔ skills/ با شش مهارت (add-model، add-provider، add-feature، edit-appjs، debug-stream، update-docs) + skills/README.md (جدول «کدام مهارت را بخوانم؟»، سه قانون طلایی، نقشهٔ ابزارها و ریپو) و خارج‌کردن /skills/ از .gitignore
+- بازنویسی README.md (۱۴ بخش + پیوست انگلیسی) با بلوک‌های GENERATED برای مدل‌ها/پروایدرها/گروه‌ها/مسیرها/env/کلیدها/آمار/اسکریپت‌ها/مهارت‌ها و حذف آلودگی بایت NUL؛ به‌روزرسانی HANDOFF.md (نسخهٔ ۲.۰) و AI-GUIDE.md (رجیستری، resolveModel، playbook تازه، مرجع فایل‌ها بدون شمارهٔ خط)
+
+Stage Summary:
+- تحویل‌دادنی‌ها: providers.json + docs/providers.schema.json · src/lib/{catalog,providers}.ts · بازنویسی routeها و page.tsx · آینهٔ کامل در app.js · scripts/{verify,smoke,mock-upstream,dev-mock,docs-sync,sync-builtin,embed-logos}.mjs + scripts/lib/test-config.mjs · skills/ (۷ فایل) · README.md/HANDOFF.md/AI-GUIDE.md به‌روز + کپی download/ · ۲۲ اسکریپت npm
+- وضعیت کیفیت: npm run verify → ۰ خطا/۰ هشدار · npm run smoke → ۳۰/۳۰ (app.js) و ۲۸/۲۸ (Next با dev:mock) · npm run typecheck → سبز · npm run lint → ۰ خطا/۱ هشدار قدیمی (فونت layout)
+- تصمیم‌های کاربر رعایت شد: کلیدهای واقعی API در اسناد باقی ماندند · ساختار دوزبانهٔ README (سرآیند انگلیسی + متن فارسی) حفظ شد · «اسکیل» به‌معنای مهارت/توسعه‌پذیری (پروایدر و مدل جدید، اتصال به سایت‌های دیگر) پیاده و مستند شد
+- افزودن مدل یا پروایدر جدید اکنون بدون هیچ تغییر کد ممکن است (فقط providers.json + npm run sync:builtin)؛ تنها حالتی که کد لازم دارد، فرمت پاسخ کاملاً غیراستاندارد است (sse.ts / makeUpstreamParser)
