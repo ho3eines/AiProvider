@@ -1,0 +1,602 @@
+    50→    50→const MODELS = ['claude-fable-5.1', 'claude-sonnet-4.5', 'gpt-4o', 'gemini-2.0-flash', 'deepseek-chat'];
+    51→    51→const DEFAULT_SETTINGS: Settings = {
+    52→    52→  modelId: 'claude-fable-5.1',
+    53→    53→  thinking: false,
+    54→    54→  deepSearch: false,
+    55→    55→  stream: true,
+    56→    56→  systemPrompt: '',
+    57→    57→};
+    58→    58→const MAX_RAW_LOG = 80 * 1024; // پنل Raw SSE: نگه‌داری آخرین ~80KB
+    59→    59→
+    60→    60→const SUGGESTIONS = [
+    61→    61→  { icon: Brain, title: 'توضیح مفهومی', text: 'به زبان ساده توضیح بده مدل‌های زبانی بزرگ (LLM) چطور کار می‌کنند؟' },
+    62→    62→  { icon: Code2, title: 'کد بنویس', text: 'یک اسکریپت پایتون بنویس که پرتکرارترین کلمات یک متن را پیدا کند.' },
+    63→    63→  { icon: Mail, title: 'ایمیل رسمی', text: 'یک ایمیل رسمی و محترمانه به مدیرم بنویس و درخواست یک روز مرخصی کن.' },
+    64→    64→  { icon: Languages, title: 'ترجمه', text: 'این جمله را به انگلیسی روان ترجمه کن: زندگی زیباست و باید از هر لحظه لذت برد.' },
+    65→    65→];
+    66→    66→
+    67→    67→/* ---------- ابزارها ---------- */
+    68→    68→const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+    69→    69→
+    70→    70→function loadChats(): Chat[] {
+    71→    71→  try {
+    72→    72→    const raw = localStorage.getItem('fm_chats');
+    73→    73→    if (raw) {
+    74→    74→      const arr = JSON.parse(raw);
+    75→    75→      if (Array.isArray(arr) && arr.length) return arr as Chat[];
+    76→    76→    }
+    77→    77→  } catch {
+    78→    78→    /* داده خراب — نادیده بگیر */
+    79→    79→  }
+    80→    80→  return [];
+    81→    81→}
+    82→    82→function loadSettings(): Settings {
+    83→    83→  try {
+    84→    84→    const raw = localStorage.getItem('fm_settings');
+    85→    85→    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    86→    86→  } catch {
+    87→    87→    /* نادیده بگیر */
+    88→    88→  }
+    89→    89→  return DEFAULT_SETTINGS;
+    90→    90→}
+    91→    91→
+    92→    92→async function copyText(t: string): Promise<boolean> {
+    93→    93→  try {
+    94→    94→    await navigator.clipboard.writeText(t);
+    95→    95→    return true;
+    96→    96→  } catch {
+    97→    97→    try {
+    98→    98→      const ta = document.createElement('textarea');
+    99→    99→      ta.value = t;
+   100→   100→      ta.style.position = 'fixed';
+   101→   101→      ta.style.opacity = '0';
+   102→   102→      document.body.appendChild(ta);
+   103→   103→      ta.select();
+   104→   104→      const ok = document.execCommand('copy');
+   105→   105→      ta.remove();
+   106→   106→      return ok;
+   107→   107→    } catch {
+   108→   108→      return false;
+   109→   109→    }
+   110→   110→  }
+   111→   111→}
+   112→   112→
+   113→   113→function downloadFile(name: string, content: string, mime: string): void {
+   114→   114→  const blob = new Blob([content], { type: mime + ';charset=utf-8' });
+   115→   115→  const url = URL.createObjectURL(blob);
+   116→   116→  const a = document.createElement('a');
+   117→   117→  a.href = url;
+   118→   118→  a.download = name;
+   119→   119→  document.body.appendChild(a);
+   120→   120→  a.click();
+   121→   121→  a.remove();
+   122→   122→  setTimeout(() => URL.revokeObjectURL(url), 1500);
+   123→   123→}
+   124→   124→
+   125→   125→const fmtTime = (ts: number) => new Date(ts).toLocaleDateString('fa-IR') + ' ' + new Date(ts).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+   126→   126→
+   127→   127→/* ---------- باکس تفکر مدل (جمع‌شونده) ---------- */
+   128→   128→function ThinkingBox({ text, active }: { text: string; active: boolean }) {
+   129→   129→  const [open, setOpen] = useState(active);
+   130→   130→  useEffect(() => {
+   131→   131→    setOpen(active); // در حین تفکر باز، بعد از شروع پاسخ بسته می‌شود
+   132→   132→  }, [active]);
+   133→   133→  return (
+   134→   134→    <details
+   135→   135→      className="think-box"
+   136→   136→      open={open}
+   137→   137→      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+   138→   138→    >
+   139→   139→      <summary>💭 فرایند تفکر مدل</summary>
+   140→   140→      <div dir="auto" className="px-3 pb-3 pt-1 text-xs leading-7 text-slate-400 whitespace-pre-wrap break-words max-h-60 overflow-y-auto chat-scroll">
+   141→   141→        {text}
+   142→   142→      </div>
+   143→   143→    </details>
+   144→   144→  );
+   145→   145→}
+   146→   146→
+   147→   147→/* ---------- آیتم پیام ---------- */
+   148→   148→interface MessageItemProps {
+   149→   149→  msg: Msg;
+   150→   150→  live: boolean;
+   151→   151→  isLastAssistant: boolean;
+   152→   152→  editing: boolean;
+   153→   153→  editingText: string;
+   154→   154→  onEditingTextChange: (t: string) => void;
+   155→   155→  onCopy: (m: Msg) => void;
+   156→   156→  onEditStart: (m: Msg) => void;
+   157→   157→  onEditSave: (id: string) => void;
+   158→   158→  onEditCancel: () => void;
+   159→   159→  onDelete: (id: string) => void;
+   160→   160→  onRegenerate: (id: string) => void;
+   161→   161→}
+   162→   162→
+   163→   163→const MessageItem = memo(function MessageItem(p: MessageItemProps) {
+   164→   164→  const { msg, live } = p;
+   165→   165→  const isUser = msg.role === 'user';
+   166→   166→
+   167→   167→  return (
+   168→   168→    <div className={`group flex flex-col gap-1.5 ${isUser ? 'items-end' : 'items-start'}`}>
+   169→   169→      {/* برچسب نقش */}
+   170→   170→      <div className="flex items-center gap-1.5 text-[11px] text-slate-500 px-1">
+   171→   171→        {isUser ? <span>👤 شما</span> : (
+   172→   172→          <span className="flex items-center gap-1.5">
+   173→   173→            <span className="w-4 h-4 rounded-md bg-gradient-to-br from-[#3b82f6] to-[#38bdf8] flex items-center justify-center">
+   174→   174→              <Bot className="w-3 h-3 text-white" />
+   175→   175→            </span>
+   176→   176→            دستیار
+   177→   177→          </span>
+   178→   178→        )}
+   179→   179→      </div>
+   180→   180→
+   181→   181→      {/* حباب پیام */}
+   182→   182→      <div
+   183→   183→        dir="auto"
+   184→   184→        className={
+   185→   185→          isUser
+   186→   186→            ? 'max-w-[88%] rounded-2xl rounded-bl-md bg-[#233457] px-4 py-3 text-[15px] leading-8 text-slate-100 whitespace-pre-wrap break-words'
+   187→   187→            : msg.isError && !msg.content
+   188→   188→              ? 'w-full max-w-[720px] rounded-2xl rounded-br-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm leading-7 text-red-200 break-words'
+   189→   189→              : 'w-full max-w-[720px] rounded-2xl rounded-br-md border border-[#243352] bg-[#111a2e] px-4 py-3 text-[15px] leading-8 text-slate-200 break-words'
+   190→   190→        }
+   191→   191→      >
+   192→   192→        {/* تفکر مدل */}
+   193→   193→        {!isUser && msg.reasoning ? <ThinkingBox text={msg.reasoning} active={live && !msg.content} /> : null}
+   194→   194→
+   195→   195→        {/* متن پیام / ویرایش */}
+   196→   196→        {p.editing ? (
+   197→   197→          <div className="space-y-2">
+   198→   198→            <textarea
+   199→   199→              autoFocus
+   200→   200→              dir="auto"
+   201→   201→              value={p.editingText}
+   202→   202→              onChange={(e) => p.onEditingTextChange(e.target.value)}
+   203→   203→              rows={Math.min(10, Math.max(2, p.editingText.split('\n').length + 1))}
+   204→   204→              className="w-full resize-none rounded-xl border border-[#3b82f6] bg-[#0d1730] px-3 py-2 text-sm leading-7 text-slate-100 focus:outline-none"
+   205→   205→            />
+   206→   206→            <div className="flex items-center gap-2">
+   207→   207→              <button
+   208→   208→                onClick={() => p.onEditSave(msg.id)}
+   209→   209→                className="flex items-center gap-1.5 rounded-lg bg-[#3b82f6] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#2563eb]"
+   210→   210→              >
+   211→   211→                <Check className="w-3.5 h-3.5" /> ذخیره و ارسال دوباره
+   212→   212→              </button>
+   213→   213→              <button
+   214→   214→                onClick={p.onEditCancel}
+   215→   215→                className="flex items-center gap-1.5 rounded-lg border border-[#243352] px-3 py-1.5 text-xs text-slate-300 hover:bg-[#1a2440]"
+   216→   216→              >
+   217→   217→                <X className="w-3.5 h-3.5" /> انصراف
+   218→   218→              </button>
+   219→   219→            </div>
+   220→   220→          </div>
+   221→   221→        ) : isUser ? (
+   222→   222→          msg.content
+   223→   223→        ) : msg.content ? (
+   224→   224→          <div
+   225→   225→            className="md-body"
+   226→   226→            dangerouslySetInnerHTML={{ __html: live ? appendCursor(renderMarkdown(msg.content)) : renderMarkdown(msg.content) }}
+   227→   227→          />
+   228→   228→        ) : live ? (
+   229→   229→          <span className="stream-cursor" aria-hidden="true" />
+   230→   230→        ) : null}
+   231→   231→
+   232→   232→        {/* خطای داخل پیام */}
+   233→   233→        {!isUser && msg.errorText ? (
+   234→   234→          <div className="mt-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm leading-7 text-red-200">
+   235→   235→            {msg.errorText}
+   236→   236→          </div>
+   237→   237→        ) : null}
+   238→   238→
+   239→   239→        {/* نشان توقف */}
+   240→   240→        {!isUser && msg.stopped ? (
+   241→   241→          <div className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
+   242→   242→            <Square className="h-3 w-3 fill-current" /> متوقف شد
+   243→   243→          </div>
+   244→   244→        ) : null}
+   245→   245→      </div>
+   246→   246→
+   247→   247→      {/* اکشن‌ها + آمار */}
+   248→   248→      <div className="flex items-center gap-1.5 px-1 flex-wrap">
+   249→   249→        {/* اکشن‌ها — در دسکتاپ با hover، در موبایل همیشه */}
+   250→   250→        <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+   251→   251→          <button
+   252→   252→            aria-label="کپی پیام"
+   253→   253→            title="کپی"
+   254→   254→            onClick={() => p.onCopy(msg)}
+   255→   255→            className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#243352] bg-[#111a2e] text-slate-400 transition-colors hover:border-[#3b82f6] hover:text-slate-100"
+   256→   256→          >
+   257→   257→            <Copy className="h-3.5 w-3.5" />
+   258→   258→          </button>
+   259→   259→          {isUser && (
+   260→   260→            <button
+   261→   261→              aria-label="ویرایش پیام"
+   262→   262→              title="ویرایش"
+   263→   263→              onClick={() => p.onEditStart(msg)}
+   264→   264→              className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#243352] bg-[#111a2e] text-slate-400 transition-colors hover:border-[#3b82f6] hover:text-slate-100"
+   265→   265→            >
+   266→   266→              <Pencil className="h-3.5 w-3.5" />
+   267→   267→            </button>
+   268→   268→          )}
+   269→   269→          {!isUser && p.isLastAssistant && !live && (
+   270→   270→            <button
+   271→   271→              aria-label="بازتولید پاسخ"
+   272→   272→              title="بازتولید ↻"
+   273→   273→              onClick={() => p.onRegenerate(msg.id)}
+   274→   274→              className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#243352] bg-[#111a2e] text-slate-400 transition-colors hover:border-[#3b82f6] hover:text-slate-100"
+   275→   275→            >
+   276→   276→              <RotateCcw className="h-3.5 w-3.5" />
+   277→   277→            </button>
+   278→   278→          )}
+   279→   279→          <button
+   280→   280→            aria-label="حذف پیام"
+   281→   281→            title="حذف"
+   282→   282→            onClick={() => p.onDelete(msg.id)}
+   283→   283→            className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#243352] bg-[#111a2e] text-slate-400 transition-colors hover:border-red-500 hover:text-red-300"
+   284→   284→          >
+   285→   285→            <Trash2 className="h-3.5 w-3.5" />
+   286→   286→          </button>
+   287→   287→        </div>
+   288→   288→
+   289→   289→        {/* آمار پاسخ */}
+   290→   290→        {!isUser && (live || msg.timeSec != null) && (
+   291→   291→          <span className="text-[11px] text-slate-500">
+   292→   292→            {live && !msg.content ? (
+   293→   293→              '⏳ در حال دریافت پاسخ…'
+   294→   294→            ) : (
+   295→   295→              <>
+   296→   296→                {msg.timeSec != null && <>⏱ {msg.timeSec} ثانیه</>}
+   297→   297→                {msg.chunks != null && <> · 🧩 {msg.chunks} تکه</>}
+   298→   298→                {msg.chars != null && <> · ✍️ {msg.chars} نویسه</>}
+   299→   299→              </>
+   300→   300→            )}
+   301→   301→          </span>
+   302→   302→        )}
+   303→   303→      </div>
+   304→   304→    </div>
+   305→   305→  );
+   306→   306→});
+   307→   307→
+   308→   308→/* ---------- صفحه خوش‌آمد ---------- */
+   309→   309→function WelcomeScreen({ onPick }: { onPick: (t: string) => void }) {
+   310→   310→  return (
+   311→   311→    <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-7 py-10 text-center">
+   312→   312→      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#3b82f6] to-[#38bdf8] shadow-lg shadow-blue-500/20">
+   313→   313→        <Sparkles className="h-8 w-8 text-white" />
+   314→   314→      </div>
+   315→   315→      <div className="space-y-2">
+   316→   316→        <h2 className="text-2xl font-extrabold text-slate-100">چت هوشمند</h2>
+   317→   317→        <p className="text-sm text-slate-400">سوالی داری؟ بپرس — پاسخ را زنده و استریمی می‌گیری.</p>
+   318→   318→      </div>
+   319→   319→      <div className="grid w-full max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
+   320→   320→        {SUGGESTIONS.map((s) => (
+   321→   321→          <button
+   322→   322→            key={s.title}
+   323→   323→            onClick={() => onPick(s.text)}
+   324→   324→            className="group flex items-start gap-3 rounded-2xl border border-[#243352] bg-[#111a2e] p-4 text-right transition-all hover:border-[#3b82f6] hover:bg-[#14203c]"
+   325→   325→          >
+   326→   326→            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#0d1730] text-[#38bdf8] group-hover:bg-[#3b82f6] group-hover:text-white transition-colors">
+   327→   327→              <s.icon className="h-4.5 w-4.5" />
+   328→   328→            </span>
+   329→   329→            <span className="min-w-0">
+   330→   330→              <span className="block text-sm font-bold text-slate-200">{s.title}</span>
+   331→   331→              <span className="mt-1 block text-xs leading-6 text-slate-400 line-clamp-2">{s.text}</span>
+   332→   332→            </span>
+   333→   333→          </button>
+   334→   334→        ))}
+   335→   335→      </div>
+   336→   336→    </div>
+   337→   337→  );
+   338→   338→}
+   339→   339→
+   340→   340→/* ---------- پنل Raw SSE (دیباگ) ---------- */
+   341→   341→function RawPanel({
+   342→   342→  preRef, onClear, onClose, byteCount,
+   343→   343→}: {
+   344→   344→  preRef: React.RefObject<HTMLPreElement | null>;
+   345→   345→  onClear: () => void;
+   346→   346→  onClose: () => void;
+   347→   347→  byteCount: number;
+   348→   348→}) {
+   349→   349→  return (
+   350→   350→    <div className="fixed bottom-4 left-4 z-50 flex max-h-[300px] w-[min(92vw,460px)] flex-col overflow-hidden rounded-xl border border-[#243352] bg-[#0d1526] shadow-2xl">
+   351→   351→      <div className="flex shrink-0 items-center justify-between border-b border-[#243352] px-3 py-2">
+   352→   352→        <span className="text-xs font-bold text-slate-300">📡 Raw SSE — دیتای خام استریم</span>
+   353→   353→        <div className="flex items-center gap-1.5">
+   354→   354→          <span className="text-[10px] text-slate-500">{(byteCount / 1024).toFixed(1)}KB</span>
+   355→   355→          <button
+   356→   356→            aria-label="پاک کردن"
+   357→   357→            onClick={onClear}
+   358→   358→            className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 hover:bg-[#1a2440] hover:text-slate-200"
+   359→   359→          >
+   360→   360→            <Trash2 className="h-3.5 w-3.5" />
+   361→   361→          </button>
+   362→   362→          <button
+   363→   363→            aria-label="بستن"
+   364→   364→            onClick={onClose}
+   365→   365→            className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 hover:bg-[#1a2440] hover:text-slate-200"
+   366→   366→          >
+   367→   367→            <X className="h-3.5 w-3.5" />
+   368→   368→          </button>
+   369→   369→        </div>
+   370→   370→      </div>
+   371→   371→      <pre
+   372→   372→        ref={preRef}
+   373→   373→        dir="ltr"
+   374→   374→        className="raw-pre m-0 flex-1 overflow-auto p-3 text-left font-mono text-[11px] leading-5 text-slate-300"
+   375→   375→      />
+   376→   376→    </div>
+   377→   377→  );
+   378→   378→}
+   379→   379→
+   380→   380→/* ---------- کامپوننت اصلی ---------- */
+   381→   381→export default function ChatApp() {
+   382→   382→  /* ----- state ----- */
+   383→   383→  const [chats, setChats] = useState<Chat[]>([]);
+   384→   384→  const [activeId, setActiveId] = useState<string>('');
+   385→   385→  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+   386→   386→  const [input, setInput] = useState('');
+   387→   387→  const [streaming, setStreaming] = useState(false);
+   388→   388→  const [liveMsgId, setLiveMsgId] = useState<string | null>(null);
+   389→   389→  const [status, setStatus] = useState<'ok' | 'checking' | 'fail'>('checking');
+   390→   390→  const [rawOpen, setRawOpen] = useState(false);
+   391→   391→  const [settingsOpen, setSettingsOpen] = useState(false);
+   392→   392→  const [sidebarOpen, setSidebarOpen] = useState(false);
+   393→   393→  const [editingId, setEditingId] = useState<string | null>(null);
+   394→   394→  const [editingText, setEditingText] = useState('');
+   395→   395→  const [draftPrompt, setDraftPrompt] = useState('');
+   396→   396→  const [toasts, setToasts] = useState<Array<{ id: number; text: string; kind: 'ok' | 'err' }>>([]);
+   397→   397→  const [rawBytes, setRawBytes] = useState(0);
+   398→   398→
+   399→   399→  /* ----- refs ----- */
+   400→   400→  const chatsRef = useRef<Chat[]>([]);
+   401→   401→  const activeIdRef = useRef('');
+   402→   402→  const settingsRef = useRef(settings);
+   403→   403→  const streamingRef = useRef(false);
+   404→   404→  const rawOpenRef = useRef(false);
+   405→   405→  const settingsOpenRef = useRef(false);
+   406→   406→  const abortRef = useRef<AbortController | null>(null);
+   407→   407→  const streamRef = useRef<{ chatId: string; msgId: string; content: string; reasoning: string; chunks: number; error?: string; started: number } | null>(null);
+   408→   408→  const rafRef = useRef(0);
+   409→   409→  const rawRafRef = useRef(0);
+   410→   410→  const rawLogRef = useRef('');
+   411→   411→  const rawPreRef = useRef<HTMLPreElement | null>(null);
+   412→   412→  const scrollRef = useRef<HTMLDivElement | null>(null);
+   413→   413→  const nearBottomRef = useRef(true);
+   414→   414→  const taRef = useRef<HTMLTextAreaElement | null>(null);
+   415→   415→
+   416→   416→  chatsRef.current = chats;
+   417→   417→  activeIdRef.current = activeId;
+   418→   418→  settingsRef.current = settings;
+   419→   419→  streamingRef.current = streaming;
+   420→   420→  rawOpenRef.current = rawOpen;
+   421→   421→  settingsOpenRef.current = settingsOpen;
+   422→   422→
+   423→   423→  const activeChat = chats.find((c) => c.id === activeId) ?? chats[0];
+   424→   424→
+   425→   425→  /* ----- toast ----- */
+   426→   426→  const toast = useCallback((text: string, kind: 'ok' | 'err' = 'ok') => {
+   427→   427→    const id = Date.now() + Math.random();
+   428→   428→    setToasts((t) => [...t.slice(-3), { id, text, kind }]);
+   429→   429→    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
+   430→   430→  }, []);
+   431→   431→
+   432→   432→  /* ----- بارگذاری اولیه از localStorage (بعد از mount تا hydration نشکند) ----- */
+   433→   433→  useEffect(() => {
+   434→   434→    const loaded = loadChats();
+   435→   435→    if (loaded.length) {
+   436→   436→      setChats(loaded);
+   437→   437→      setActiveId(loaded[0].id);
+   438→   438→    } else {
+   439→   439→      const c: Chat = { id: uid(), title: 'گفتگوی جدید', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+   440→   440→      setChats([c]);
+   441→   441→      setActiveId(c.id);
+   442→   442→    }
+   443→   443→    setSettings(loadSettings());
+   444→   444→    // ping خودکار هنگام ورود
+   445→   445→    fetch('/api/ping')
+   446→   446→      .then((r) => r.json())
+   447→   447→      .then((j: { status?: string; ms?: number }) => {
+   448→   448→        if (j?.status === 'ok') setStatus('ok');
+   449→   449→        else setStatus('fail');
+   450→   450→      })
+   451→   451→      .catch(() => setStatus('fail'));
+   452→   452→  }, []);
+   453→   453→
+   454→   454→  /* ----- ذخیره در localStorage (با debounce سبک) ----- */
+   455→   455→  useEffect(() => {
+   456→   456→    if (!chats.length) return;
+   457→   457→    const t = setTimeout(() => {
+   458→   458→      try {
+   459→   459→        localStorage.setItem('fm_chats', JSON.stringify(chats));
+   460→   460→      } catch {
+   461→   461→        /* حافظه پر — نادیده بگیر */
+   462→   462→      }
+   463→   463→    }, 250);
+   464→   464→    return () => clearTimeout(t);
+   465→   465→  }, [chats]);
+   466→   466→
+   467→   467→  useEffect(() => {
+   468→   468→    try {
+   469→   469→      localStorage.setItem('fm_settings', JSON.stringify(settings));
+   470→   470→    } catch {
+   471→   471→      /* نادیده بگیر */
+   472→   472→    }
+   473→   473→  }, [settings]);
+   474→   474→
+   475→   475→  /* ----- اسکرول خودکار ----- */
+   476→   476→  const scrollToBottom = useCallback((smooth = false) => {
+   477→   477→    const el = scrollRef.current;
+   478→   478→    if (!el) return;
+   479→   479→    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+   480→   480→  }, []);
+   481→   481→
+   482→   482→  const onScroll = useCallback(() => {
+   483→   483→    const el = scrollRef.current;
+   484→   484→    if (!el) return;
+   485→   485→    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 90;
+   486→   486→  }, []);
+   487→   487→
+   488→   488→  useEffect(() => {
+   489→   489→    if (nearBottomRef.current) scrollToBottom();
+   490→   490→  }, [chats, scrollToBottom]);
+   491→   491→
+   492→   492→  useEffect(() => {
+   493→   493→    nearBottomRef.current = true;
+   494→   494→    scrollToBottom();
+   495→   495→  }, [activeId, scrollToBottom]);
+   496→   496→
+   497→   497→  /* ----- flush تدریجی استریم با requestAnimationFrame (نه هر تکه یک بار) ----- */
+   498→   498→  const flushNow = useCallback(() => {
+   499→   499→    const st = streamRef.current;
+   500→   500→    if (!st) return;
+   501→   501→    setChats((prev) =>
+   502→   502→      prev.map((c) =>
+   503→   503→        c.id !== st.chatId
+   504→   504→          ? c
+   505→   505→          : {
+   506→   506→              ...c,
+   507→   507→              messages: c.messages.map((m) =>
+   508→   508→                m.id !== st.msgId ? m : { ...m, content: st.content, reasoning: st.reasoning || undefined }
+   509→   509→              ),
+   510→   510→            }
+   511→   511→      )
+   512→   512→    );
+   513→   513→  }, []);
+   514→   514→
+   515→   515→  const scheduleFlush = useCallback(() => {
+   516→   516→    if (rafRef.current) return;
+   517→   517→    rafRef.current = requestAnimationFrame(() => {
+   518→   518→      rafRef.current = 0;
+   519→   519→      flushNow();
+   520→   520→    });
+   521→   521→  }, [flushNow]);
+   522→   522→
+   523→   523→  /* ----- پنل Raw SSE ----- */
+   524→   524→  const appendRaw = useCallback((s: string) => {
+   525→   525→    rawLogRef.current += s;
+   526→   526→    if (rawLogRef.current.length > MAX_RAW_LOG) rawLogRef.current = rawLogRef.current.slice(-MAX_RAW_LOG);
+   527→   527→    if (!rawOpenRef.current || rawRafRef.current) return;
+   528→   528→    rawRafRef.current = requestAnimationFrame(() => {
+   529→   529→      rawRafRef.current = 0;
+   530→   530→      const el = rawPreRef.current;
+   531→   531→      if (el) {
+   532→   532→        el.textContent = rawLogRef.current;
+   533→   533→        el.scrollTop = el.scrollHeight;
+   534→   534→      }
+   535→   535→      setRawBytes(rawLogRef.current.length);
+   536→   536→    });
+   537→   537→  }, []);
+   538→   538→
+   539→   539→  const toggleRaw = useCallback(() => {
+   540→   540→    setRawOpen((v) => {
+   541→   541→      const nv = !v;
+   542→   542→      if (nv) {
+   543→   543→        requestAnimationFrame(() => {
+   544→   544→          const el = rawPreRef.current;
+   545→   545→          if (el) el.textContent = rawLogRef.current;
+   546→   546→          setRawBytes(rawLogRef.current.length);
+   547→   547→        });
+   548→   548→      }
+   549→   549→      return nv;
+   550→   550→    });
+   551→   551→  }, []);
+   552→   552→
+   553→   553→  const clearRaw = useCallback(() => {
+   554→   554→    rawLogRef.current = '';
+   555→   555→    if (rawPreRef.current) rawPreRef.current.textContent = '';
+   556→   556→    setRawBytes(0);
+   557→   557→  }, []);
+   558→   558→
+   559→   559→  /* ----- اتمام پیام استریمی ----- */
+   560→   560→  const finishMsg = useCallback(
+   561→   561→    (aborted: boolean, err?: unknown) => {
+   562→   562→      const st = streamRef.current;
+   563→   563→      if (!st) return;
+   564→   564→
+   565→   565→      if (aborted && !st.content && !st.reasoning) {
+   566→   566→        // هیچی نرسیده → حباب خالی را حذف کن
+   567→   567→        setChats((prev) =>
+   568→   568→          prev.map((c) => (c.id !== st.chatId ? c : { ...c, messages: c.messages.filter((m) => m.id !== st.msgId) }))
+   569→   569→        );
+   570→   570→        return;
+   571→   571→      }
+   572→   572→
+   573→   573→      const secs = Math.round((Date.now() - st.started) / 100) / 10;
+   574→   574→      let content = st.content;
+   575→   575→      let errorText: string | undefined;
+   576→   576→      let isError = false;
+   577→   577→      const stopped = aborted;
+   578→   578→
+   579→   579→      if (!aborted) {
+   580→   580→        if (st.error) {
+   581→   581→          errorText = '❌ ' + st.error;
+   582→   582→          isError = true;
+   583→   583→        } else if ((err as { httpStatus?: number })?.httpStatus) {
+   584→   584→          const he = err as { httpStatus: number; httpBody: string };
+   585→   585→          errorText = `❌ HTTP ${he.httpStatus}${he.httpBody ? ' — ' + he.httpBody : ''}`;
+   586→   586→          isError = true;
+   587→   587→        } else if (err) {
+   588→   588→          errorText =
+   589→   589→            '❌ خطا در ارتباط با سرور — مطمئن شوید سرور در حال اجرا است و اتصال اینترنت برقرار است. (' +
+   590→   590→            (err as Error).message +
+   591→   591→            ')';
+   592→   592→          isError = true;
+   593→   593→        } else if (!content.trim() && !st.reasoning) {
+   594→   594→          content = 'پاسخ خالی از سرور دریافت شد';
+   595→   595→          isError = true;
+   596→   596→        }
+   597→   597→      }
+   598→   598→
+   599→   599→      setChats((prev) =>
+   600→   600→        prev.map((c) =>
+   601→   601→          c.id !== st.chatId
+   602→   602→            ? c
+   603→   603→            : {
+   604→   604→                ...c,
+   605→   605→                updatedAt: Date.now(),
+   606→   606→                messages: c.messages.map((m) =>
+   607→   607→                  m.id !== st.msgId
+   608→   608→                    ? m
+   609→   609→                    : {
+   610→   610→                        ...m,
+   611→   611→                        content,
+   612→   612→                        reasoning: st.reasoning || undefined,
+   613→   613→                        errorText,
+   614→   614→                        isError: isError || undefined,
+   615→   615→                        stopped: stopped || undefined,
+   616→   616→                        timeSec: secs,
+   617→   617→                        chunks: st.chunks,
+   618→   618→                        chars: content.length,
+   619→   619→                      }
+   620→   620→                ),
+   621→   621→              }
+   622→   622→        )
+   623→   623→      );
+   624→   624→    },
+   625→   625→    []
+   626→   626→  );
+   627→   627→
+   628→   628→  /* ----- هسته اجرای پاسخ ----- */
+   629→   629→  const runCompletion = useCallback(
+   630→   630→    async (chatId: string, history: Msg[]) => {
+   631→   631→      const s = settingsRef.current;
+   632→   632→      const aid = uid();
+   633→   633→
+   634→   634→      // پیام placeholder دستیار
+   635→   635→      setChats((prev) =>
+   636→   636→        prev.map((c) =>
+   637→   637→          c.id !== chatId
+   638→   638→            ? c
+   639→   639→            : { ...c, updatedAt: Date.now(), messages: [...history, { id: aid, role: 'assistant' as Role, content: '', createdAt: Date.now() }] }
+   640→   640→        )
+   641→   641→      );
+   642→   642→      setLiveMsgId(aid);
+   643→   643→      setStreaming(true);
+   644→   644→      streamRef.current = { chatId, msgId: aid, content: '', reasoning: '', chunks: 0, started: Date.now() };
+   645→   645→
+   646→   646→      const ac = new AbortController();
+   647→   647→      abortRef.current = ac;
+   648→   648→      nearBottomRef.current = true;
+   649→   649→
+
+[showing lines 50-649 of 1364; use offset=650 with limit to continue reading]

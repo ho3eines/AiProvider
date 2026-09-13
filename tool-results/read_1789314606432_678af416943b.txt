@@ -1,0 +1,1364 @@
+     1→'use client';
+     2→
+     3→/**
+     4→ * اپلیکیشن چت هوشمند — تک‌صفحه‌ای، RTL، تم تاریک
+     5→ * قابلیت‌ها: استریم زنده SSE، چند گفتگو با localStorage، مارک‌داون امن،
+     6→ * تفکر مدل، توقف/بازتولید/ویرایش/حذف پیام، خروجی Markdown/JSON، پنل Raw SSE
+     7→ */
+     8→import { memo, useCallback, useEffect, useRef, useState } from 'react';
+     9→import {
+    10→  Activity, Bot, Brain, Check, Code2, Copy, Download, FileJson, Languages, Mail, Menu,
+    11→  MessageSquare, Pencil, Plus, RotateCcw, Send, Settings, Sparkles, Square, Trash2, X,
+    12→} from 'lucide-react';
+    13→import { appendCursor, renderMarkdown, getCodeById } from '@/lib/markdown';
+    14→import { createSseParser } from '@/lib/sse';
+    15→
+    16→/* ---------- انواع داده ---------- */
+    17→type Role = 'user' | 'assistant';
+    18→
+    19→interface Msg {
+    20→  id: string;
+    21→  role: Role;
+    22→  content: string;
+    23→  reasoning?: string;      // متن تفکر مدل
+    24→  errorText?: string;      // متن خطا (حباب قرمز)
+    25→  isError?: boolean;       // حباب قرمز
+    26→  stopped?: boolean;       // ⏹ نیمه‌کاره رها شده
+    27→  timeSec?: number;        // آمار: زمان
+    28→  chunks?: number;         // آمار: تعداد تکه
+    29→  chars?: number;          // آمار: تعداد نویسه
+    30→  createdAt: number;
+    31→}
+    32→
+    33→interface Chat {
+    34→  id: string;
+    35→  title: string;
+    36→  messages: Msg[];
+    37→  createdAt: number;
+    38→  updatedAt: number;
+    39→}
+    40→
+    41→interface Settings {
+    42→  modelId: string;
+    43→  thinking: boolean;
+    44→  deepSearch: boolean;
+    45→  stream: boolean;
+    46→  systemPrompt: string;
+    47→}
+    48→
+    49→/* ---------- ثابت‌ها ---------- */
+    50→const MODELS = ['claude-fable-5.1', 'claude-sonnet-4.5', 'gpt-4o', 'gemini-2.0-flash', 'deepseek-chat'];
+    51→const DEFAULT_SETTINGS: Settings = {
+    52→  modelId: 'claude-fable-5.1',
+    53→  thinking: false,
+    54→  deepSearch: false,
+    55→  stream: true,
+    56→  systemPrompt: '',
+    57→};
+    58→const MAX_RAW_LOG = 80 * 1024; // پنل Raw SSE: نگه‌داری آخرین ~80KB
+    59→
+    60→const SUGGESTIONS = [
+    61→  { icon: Brain, title: 'توضیح مفهومی', text: 'به زبان ساده توضیح بده مدل‌های زبانی بزرگ (LLM) چطور کار می‌کنند؟' },
+    62→  { icon: Code2, title: 'کد بنویس', text: 'یک اسکریپت پایتون بنویس که پرتکرارترین کلمات یک متن را پیدا کند.' },
+    63→  { icon: Mail, title: 'ایمیل رسمی', text: 'یک ایمیل رسمی و محترمانه به مدیرم بنویس و درخواست یک روز مرخصی کن.' },
+    64→  { icon: Languages, title: 'ترجمه', text: 'این جمله را به انگلیسی روان ترجمه کن: زندگی زیباست و باید از هر لحظه لذت برد.' },
+    65→];
+    66→
+    67→/* ---------- ابزارها ---------- */
+    68→const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+    69→
+    70→function loadChats(): Chat[] {
+    71→  try {
+    72→    const raw = localStorage.getItem('fm_chats');
+    73→    if (raw) {
+    74→      const arr = JSON.parse(raw);
+    75→      if (Array.isArray(arr) && arr.length) return arr as Chat[];
+    76→    }
+    77→  } catch {
+    78→    /* داده خراب — نادیده بگیر */
+    79→  }
+    80→  return [];
+    81→}
+    82→function loadSettings(): Settings {
+    83→  try {
+    84→    const raw = localStorage.getItem('fm_settings');
+    85→    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    86→  } catch {
+    87→    /* نادیده بگیر */
+    88→  }
+    89→  return DEFAULT_SETTINGS;
+    90→}
+    91→
+    92→async function copyText(t: string): Promise<boolean> {
+    93→  try {
+    94→    await navigator.clipboard.writeText(t);
+    95→    return true;
+    96→  } catch {
+    97→    try {
+    98→      const ta = document.createElement('textarea');
+    99→      ta.value = t;
+   100→      ta.style.position = 'fixed';
+   101→      ta.style.opacity = '0';
+   102→      document.body.appendChild(ta);
+   103→      ta.select();
+   104→      const ok = document.execCommand('copy');
+   105→      ta.remove();
+   106→      return ok;
+   107→    } catch {
+   108→      return false;
+   109→    }
+   110→  }
+   111→}
+   112→
+   113→function downloadFile(name: string, content: string, mime: string): void {
+   114→  const blob = new Blob([content], { type: mime + ';charset=utf-8' });
+   115→  const url = URL.createObjectURL(blob);
+   116→  const a = document.createElement('a');
+   117→  a.href = url;
+   118→  a.download = name;
+   119→  document.body.appendChild(a);
+   120→  a.click();
+   121→  a.remove();
+   122→  setTimeout(() => URL.revokeObjectURL(url), 1500);
+   123→}
+   124→
+   125→const fmtTime = (ts: number) => new Date(ts).toLocaleDateString('fa-IR') + ' ' + new Date(ts).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+   126→
+   127→/* ---------- باکس تفکر مدل (جمع‌شونده) ---------- */
+   128→function ThinkingBox({ text, active }: { text: string; active: boolean }) {
+   129→  const [open, setOpen] = useState(active);
+   130→  useEffect(() => {
+   131→    setOpen(active); // در حین تفکر باز، بعد از شروع پاسخ بسته می‌شود
+   132→  }, [active]);
+   133→  return (
+   134→    <details
+   135→      className="think-box"
+   136→      open={open}
+   137→      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+   138→    >
+   139→      <summary>💭 فرایند تفکر مدل</summary>
+   140→      <div dir="auto" className="px-3 pb-3 pt-1 text-xs leading-7 text-slate-400 whitespace-pre-wrap break-words max-h-60 overflow-y-auto chat-scroll">
+   141→        {text}
+   142→      </div>
+   143→    </details>
+   144→  );
+   145→}
+   146→
+   147→/* ---------- آیتم پیام ---------- */
+   148→interface MessageItemProps {
+   149→  msg: Msg;
+   150→  live: boolean;
+   151→  isLastAssistant: boolean;
+   152→  editing: boolean;
+   153→  editingText: string;
+   154→  onEditingTextChange: (t: string) => void;
+   155→  onCopy: (m: Msg) => void;
+   156→  onEditStart: (m: Msg) => void;
+   157→  onEditSave: (id: string) => void;
+   158→  onEditCancel: () => void;
+   159→  onDelete: (id: string) => void;
+   160→  onRegenerate: (id: string) => void;
+   161→}
+   162→
+   163→const MessageItem = memo(function MessageItem(p: MessageItemProps) {
+   164→  const { msg, live } = p;
+   165→  const isUser = msg.role === 'user';
+   166→
+   167→  return (
+   168→    <div className={`group flex flex-col gap-1.5 ${isUser ? 'items-end' : 'items-start'}`}>
+   169→      {/* برچسب نقش */}
+   170→      <div className="flex items-center gap-1.5 text-[11px] text-slate-500 px-1">
+   171→        {isUser ? <span>👤 شما</span> : (
+   172→          <span className="flex items-center gap-1.5">
+   173→            <span className="w-4 h-4 rounded-md bg-gradient-to-br from-[#3b82f6] to-[#38bdf8] flex items-center justify-center">
+   174→              <Bot className="w-3 h-3 text-white" />
+   175→            </span>
+   176→            دستیار
+   177→          </span>
+   178→        )}
+   179→      </div>
+   180→
+   181→      {/* حباب پیام */}
+   182→      <div
+   183→        dir="auto"
+   184→        className={
+   185→          isUser
+   186→            ? 'max-w-[88%] rounded-2xl rounded-bl-md bg-[#233457] px-4 py-3 text-[15px] leading-8 text-slate-100 whitespace-pre-wrap break-words'
+   187→            : msg.isError && !msg.content
+   188→              ? 'w-full max-w-[720px] rounded-2xl rounded-br-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm leading-7 text-red-200 break-words'
+   189→              : 'w-full max-w-[720px] rounded-2xl rounded-br-md border border-[#243352] bg-[#111a2e] px-4 py-3 text-[15px] leading-8 text-slate-200 break-words'
+   190→        }
+   191→      >
+   192→        {/* تفکر مدل */}
+   193→        {!isUser && msg.reasoning ? <ThinkingBox text={msg.reasoning} active={live && !msg.content} /> : null}
+   194→
+   195→        {/* متن پیام / ویرایش */}
+   196→        {p.editing ? (
+   197→          <div className="space-y-2">
+   198→            <textarea
+   199→              autoFocus
+   200→              dir="auto"
+   201→              value={p.editingText}
+   202→              onChange={(e) => p.onEditingTextChange(e.target.value)}
+   203→              rows={Math.min(10, Math.max(2, p.editingText.split('\n').length + 1))}
+   204→              className="w-full resize-none rounded-xl border border-[#3b82f6] bg-[#0d1730] px-3 py-2 text-sm leading-7 text-slate-100 focus:outline-none"
+   205→            />
+   206→            <div className="flex items-center gap-2">
+   207→              <button
+   208→                onClick={() => p.onEditSave(msg.id)}
+   209→                className="flex items-center gap-1.5 rounded-lg bg-[#3b82f6] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#2563eb]"
+   210→              >
+   211→                <Check className="w-3.5 h-3.5" /> ذخیره و ارسال دوباره
+   212→              </button>
+   213→              <button
+   214→                onClick={p.onEditCancel}
+   215→                className="flex items-center gap-1.5 rounded-lg border border-[#243352] px-3 py-1.5 text-xs text-slate-300 hover:bg-[#1a2440]"
+   216→              >
+   217→                <X className="w-3.5 h-3.5" /> انصراف
+   218→              </button>
+   219→            </div>
+   220→          </div>
+   221→        ) : isUser ? (
+   222→          msg.content
+   223→        ) : msg.content ? (
+   224→          <div
+   225→            className="md-body"
+   226→            dangerouslySetInnerHTML={{ __html: live ? appendCursor(renderMarkdown(msg.content)) : renderMarkdown(msg.content) }}
+   227→          />
+   228→        ) : live ? (
+   229→          <span className="stream-cursor" aria-hidden="true" />
+   230→        ) : null}
+   231→
+   232→        {/* خطای داخل پیام */}
+   233→        {!isUser && msg.errorText ? (
+   234→          <div className="mt-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm leading-7 text-red-200">
+   235→            {msg.errorText}
+   236→          </div>
+   237→        ) : null}
+   238→
+   239→        {/* نشان توقف */}
+   240→        {!isUser && msg.stopped ? (
+   241→          <div className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
+   242→            <Square className="h-3 w-3 fill-current" /> متوقف شد
+   243→          </div>
+   244→        ) : null}
+   245→      </div>
+   246→
+   247→      {/* اکشن‌ها + آمار */}
+   248→      <div className="flex items-center gap-1.5 px-1 flex-wrap">
+   249→        {/* اکشن‌ها — در دسکتاپ با hover، در موبایل همیشه */}
+   250→        <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+   251→          <button
+   252→            aria-label="کپی پیام"
+   253→            title="کپی"
+   254→            onClick={() => p.onCopy(msg)}
+   255→            className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#243352] bg-[#111a2e] text-slate-400 transition-colors hover:border-[#3b82f6] hover:text-slate-100"
+   256→          >
+   257→            <Copy className="h-3.5 w-3.5" />
+   258→          </button>
+   259→          {isUser && (
+   260→            <button
+   261→              aria-label="ویرایش پیام"
+   262→              title="ویرایش"
+   263→              onClick={() => p.onEditStart(msg)}
+   264→              className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#243352] bg-[#111a2e] text-slate-400 transition-colors hover:border-[#3b82f6] hover:text-slate-100"
+   265→            >
+   266→              <Pencil className="h-3.5 w-3.5" />
+   267→            </button>
+   268→          )}
+   269→          {!isUser && p.isLastAssistant && !live && (
+   270→            <button
+   271→              aria-label="بازتولید پاسخ"
+   272→              title="بازتولید ↻"
+   273→              onClick={() => p.onRegenerate(msg.id)}
+   274→              className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#243352] bg-[#111a2e] text-slate-400 transition-colors hover:border-[#3b82f6] hover:text-slate-100"
+   275→            >
+   276→              <RotateCcw className="h-3.5 w-3.5" />
+   277→            </button>
+   278→          )}
+   279→          <button
+   280→            aria-label="حذف پیام"
+   281→            title="حذف"
+   282→            onClick={() => p.onDelete(msg.id)}
+   283→            className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#243352] bg-[#111a2e] text-slate-400 transition-colors hover:border-red-500 hover:text-red-300"
+   284→          >
+   285→            <Trash2 className="h-3.5 w-3.5" />
+   286→          </button>
+   287→        </div>
+   288→
+   289→        {/* آمار پاسخ */}
+   290→        {!isUser && (live || msg.timeSec != null) && (
+   291→          <span className="text-[11px] text-slate-500">
+   292→            {live && !msg.content ? (
+   293→              '⏳ در حال دریافت پاسخ…'
+   294→            ) : (
+   295→              <>
+   296→                {msg.timeSec != null && <>⏱ {msg.timeSec} ثانیه</>}
+   297→                {msg.chunks != null && <> · 🧩 {msg.chunks} تکه</>}
+   298→                {msg.chars != null && <> · ✍️ {msg.chars} نویسه</>}
+   299→              </>
+   300→            )}
+   301→          </span>
+   302→        )}
+   303→      </div>
+   304→    </div>
+   305→  );
+   306→});
+   307→
+   308→/* ---------- صفحه خوش‌آمد ---------- */
+   309→function WelcomeScreen({ onPick }: { onPick: (t: string) => void }) {
+   310→  return (
+   311→    <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-7 py-10 text-center">
+   312→      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#3b82f6] to-[#38bdf8] shadow-lg shadow-blue-500/20">
+   313→        <Sparkles className="h-8 w-8 text-white" />
+   314→      </div>
+   315→      <div className="space-y-2">
+   316→        <h2 className="text-2xl font-extrabold text-slate-100">چت هوشمند</h2>
+   317→        <p className="text-sm text-slate-400">سوالی داری؟ بپرس — پاسخ را زنده و استریمی می‌گیری.</p>
+   318→      </div>
+   319→      <div className="grid w-full max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
+   320→        {SUGGESTIONS.map((s) => (
+   321→          <button
+   322→            key={s.title}
+   323→            onClick={() => onPick(s.text)}
+   324→            className="group flex items-start gap-3 rounded-2xl border border-[#243352] bg-[#111a2e] p-4 text-right transition-all hover:border-[#3b82f6] hover:bg-[#14203c]"
+   325→          >
+   326→            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#0d1730] text-[#38bdf8] group-hover:bg-[#3b82f6] group-hover:text-white transition-colors">
+   327→              <s.icon className="h-4.5 w-4.5" />
+   328→            </span>
+   329→            <span className="min-w-0">
+   330→              <span className="block text-sm font-bold text-slate-200">{s.title}</span>
+   331→              <span className="mt-1 block text-xs leading-6 text-slate-400 line-clamp-2">{s.text}</span>
+   332→            </span>
+   333→          </button>
+   334→        ))}
+   335→      </div>
+   336→    </div>
+   337→  );
+   338→}
+   339→
+   340→/* ---------- پنل Raw SSE (دیباگ) ---------- */
+   341→function RawPanel({
+   342→  preRef, onClear, onClose, byteCount,
+   343→}: {
+   344→  preRef: React.RefObject<HTMLPreElement | null>;
+   345→  onClear: () => void;
+   346→  onClose: () => void;
+   347→  byteCount: number;
+   348→}) {
+   349→  return (
+   350→    <div className="fixed bottom-4 left-4 z-50 flex max-h-[300px] w-[min(92vw,460px)] flex-col overflow-hidden rounded-xl border border-[#243352] bg-[#0d1526] shadow-2xl">
+   351→      <div className="flex shrink-0 items-center justify-between border-b border-[#243352] px-3 py-2">
+   352→        <span className="text-xs font-bold text-slate-300">📡 Raw SSE — دیتای خام استریم</span>
+   353→        <div className="flex items-center gap-1.5">
+   354→          <span className="text-[10px] text-slate-500">{(byteCount / 1024).toFixed(1)}KB</span>
+   355→          <button
+   356→            aria-label="پاک کردن"
+   357→            onClick={onClear}
+   358→            className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 hover:bg-[#1a2440] hover:text-slate-200"
+   359→          >
+   360→            <Trash2 className="h-3.5 w-3.5" />
+   361→          </button>
+   362→          <button
+   363→            aria-label="بستن"
+   364→            onClick={onClose}
+   365→            className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 hover:bg-[#1a2440] hover:text-slate-200"
+   366→          >
+   367→            <X className="h-3.5 w-3.5" />
+   368→          </button>
+   369→        </div>
+   370→      </div>
+   371→      <pre
+   372→        ref={preRef}
+   373→        dir="ltr"
+   374→        className="raw-pre m-0 flex-1 overflow-auto p-3 text-left font-mono text-[11px] leading-5 text-slate-300"
+   375→      />
+   376→    </div>
+   377→  );
+   378→}
+   379→
+   380→/* ---------- کامپوننت اصلی ---------- */
+   381→export default function ChatApp() {
+   382→  /* ----- state ----- */
+   383→  const [chats, setChats] = useState<Chat[]>([]);
+   384→  const [activeId, setActiveId] = useState<string>('');
+   385→  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+   386→  const [input, setInput] = useState('');
+   387→  const [streaming, setStreaming] = useState(false);
+   388→  const [liveMsgId, setLiveMsgId] = useState<string | null>(null);
+   389→  const [status, setStatus] = useState<'ok' | 'checking' | 'fail'>('checking');
+   390→  const [rawOpen, setRawOpen] = useState(false);
+   391→  const [settingsOpen, setSettingsOpen] = useState(false);
+   392→  const [sidebarOpen, setSidebarOpen] = useState(false);
+   393→  const [editingId, setEditingId] = useState<string | null>(null);
+   394→  const [editingText, setEditingText] = useState('');
+   395→  const [draftPrompt, setDraftPrompt] = useState('');
+   396→  const [toasts, setToasts] = useState<Array<{ id: number; text: string; kind: 'ok' | 'err' }>>([]);
+   397→  const [rawBytes, setRawBytes] = useState(0);
+   398→
+   399→  /* ----- refs ----- */
+   400→  const chatsRef = useRef<Chat[]>([]);
+   401→  const activeIdRef = useRef('');
+   402→  const settingsRef = useRef(settings);
+   403→  const streamingRef = useRef(false);
+   404→  const rawOpenRef = useRef(false);
+   405→  const settingsOpenRef = useRef(false);
+   406→  const abortRef = useRef<AbortController | null>(null);
+   407→  const streamRef = useRef<{ chatId: string; msgId: string; content: string; reasoning: string; chunks: number; error?: string; started: number } | null>(null);
+   408→  const rafRef = useRef(0);
+   409→  const rawRafRef = useRef(0);
+   410→  const rawLogRef = useRef('');
+   411→  const rawPreRef = useRef<HTMLPreElement | null>(null);
+   412→  const scrollRef = useRef<HTMLDivElement | null>(null);
+   413→  const nearBottomRef = useRef(true);
+   414→  const taRef = useRef<HTMLTextAreaElement | null>(null);
+   415→
+   416→  chatsRef.current = chats;
+   417→  activeIdRef.current = activeId;
+   418→  settingsRef.current = settings;
+   419→  streamingRef.current = streaming;
+   420→  rawOpenRef.current = rawOpen;
+   421→  settingsOpenRef.current = settingsOpen;
+   422→
+   423→  const activeChat = chats.find((c) => c.id === activeId) ?? chats[0];
+   424→
+   425→  /* ----- toast ----- */
+   426→  const toast = useCallback((text: string, kind: 'ok' | 'err' = 'ok') => {
+   427→    const id = Date.now() + Math.random();
+   428→    setToasts((t) => [...t.slice(-3), { id, text, kind }]);
+   429→    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
+   430→  }, []);
+   431→
+   432→  /* ----- بارگذاری اولیه از localStorage (بعد از mount تا hydration نشکند) ----- */
+   433→  useEffect(() => {
+   434→    const loaded = loadChats();
+   435→    if (loaded.length) {
+   436→      setChats(loaded);
+   437→      setActiveId(loaded[0].id);
+   438→    } else {
+   439→      const c: Chat = { id: uid(), title: 'گفتگوی جدید', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+   440→      setChats([c]);
+   441→      setActiveId(c.id);
+   442→    }
+   443→    setSettings(loadSettings());
+   444→    // ping خودکار هنگام ورود
+   445→    fetch('/api/ping')
+   446→      .then((r) => r.json())
+   447→      .then((j: { status?: string; ms?: number }) => {
+   448→        if (j?.status === 'ok') setStatus('ok');
+   449→        else setStatus('fail');
+   450→      })
+   451→      .catch(() => setStatus('fail'));
+   452→  }, []);
+   453→
+   454→  /* ----- ذخیره در localStorage (با debounce سبک) ----- */
+   455→  useEffect(() => {
+   456→    if (!chats.length) return;
+   457→    const t = setTimeout(() => {
+   458→      try {
+   459→        localStorage.setItem('fm_chats', JSON.stringify(chats));
+   460→      } catch {
+   461→        /* حافظه پر — نادیده بگیر */
+   462→      }
+   463→    }, 250);
+   464→    return () => clearTimeout(t);
+   465→  }, [chats]);
+   466→
+   467→  useEffect(() => {
+   468→    try {
+   469→      localStorage.setItem('fm_settings', JSON.stringify(settings));
+   470→    } catch {
+   471→      /* نادیده بگیر */
+   472→    }
+   473→  }, [settings]);
+   474→
+   475→  /* ----- اسکرول خودکار ----- */
+   476→  const scrollToBottom = useCallback((smooth = false) => {
+   477→    const el = scrollRef.current;
+   478→    if (!el) return;
+   479→    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+   480→  }, []);
+   481→
+   482→  const onScroll = useCallback(() => {
+   483→    const el = scrollRef.current;
+   484→    if (!el) return;
+   485→    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 90;
+   486→  }, []);
+   487→
+   488→  useEffect(() => {
+   489→    if (nearBottomRef.current) scrollToBottom();
+   490→  }, [chats, scrollToBottom]);
+   491→
+   492→  useEffect(() => {
+   493→    nearBottomRef.current = true;
+   494→    scrollToBottom();
+   495→  }, [activeId, scrollToBottom]);
+   496→
+   497→  /* ----- flush تدریجی استریم با requestAnimationFrame (نه هر تکه یک بار) ----- */
+   498→  const flushNow = useCallback(() => {
+   499→    const st = streamRef.current;
+   500→    if (!st) return;
+   501→    setChats((prev) =>
+   502→      prev.map((c) =>
+   503→        c.id !== st.chatId
+   504→          ? c
+   505→          : {
+   506→              ...c,
+   507→              messages: c.messages.map((m) =>
+   508→                m.id !== st.msgId ? m : { ...m, content: st.content, reasoning: st.reasoning || undefined }
+   509→              ),
+   510→            }
+   511→      )
+   512→    );
+   513→  }, []);
+   514→
+   515→  const scheduleFlush = useCallback(() => {
+   516→    if (rafRef.current) return;
+   517→    rafRef.current = requestAnimationFrame(() => {
+   518→      rafRef.current = 0;
+   519→      flushNow();
+   520→    });
+   521→  }, [flushNow]);
+   522→
+   523→  /* ----- پنل Raw SSE ----- */
+   524→  const appendRaw = useCallback((s: string) => {
+   525→    rawLogRef.current += s;
+   526→    if (rawLogRef.current.length > MAX_RAW_LOG) rawLogRef.current = rawLogRef.current.slice(-MAX_RAW_LOG);
+   527→    if (!rawOpenRef.current || rawRafRef.current) return;
+   528→    rawRafRef.current = requestAnimationFrame(() => {
+   529→      rawRafRef.current = 0;
+   530→      const el = rawPreRef.current;
+   531→      if (el) {
+   532→        el.textContent = rawLogRef.current;
+   533→        el.scrollTop = el.scrollHeight;
+   534→      }
+   535→      setRawBytes(rawLogRef.current.length);
+   536→    });
+   537→  }, []);
+   538→
+   539→  const toggleRaw = useCallback(() => {
+   540→    setRawOpen((v) => {
+   541→      const nv = !v;
+   542→      if (nv) {
+   543→        requestAnimationFrame(() => {
+   544→          const el = rawPreRef.current;
+   545→          if (el) el.textContent = rawLogRef.current;
+   546→          setRawBytes(rawLogRef.current.length);
+   547→        });
+   548→      }
+   549→      return nv;
+   550→    });
+   551→  }, []);
+   552→
+   553→  const clearRaw = useCallback(() => {
+   554→    rawLogRef.current = '';
+   555→    if (rawPreRef.current) rawPreRef.current.textContent = '';
+   556→    setRawBytes(0);
+   557→  }, []);
+   558→
+   559→  /* ----- اتمام پیام استریمی ----- */
+   560→  const finishMsg = useCallback(
+   561→    (aborted: boolean, err?: unknown) => {
+   562→      const st = streamRef.current;
+   563→      if (!st) return;
+   564→
+   565→      if (aborted && !st.content && !st.reasoning) {
+   566→        // هیچی نرسیده → حباب خالی را حذف کن
+   567→        setChats((prev) =>
+   568→          prev.map((c) => (c.id !== st.chatId ? c : { ...c, messages: c.messages.filter((m) => m.id !== st.msgId) }))
+   569→        );
+   570→        return;
+   571→      }
+   572→
+   573→      const secs = Math.round((Date.now() - st.started) / 100) / 10;
+   574→      let content = st.content;
+   575→      let errorText: string | undefined;
+   576→      let isError = false;
+   577→      const stopped = aborted;
+   578→
+   579→      if (!aborted) {
+   580→        if (st.error) {
+   581→          errorText = '❌ ' + st.error;
+   582→          isError = true;
+   583→        } else if ((err as { httpStatus?: number })?.httpStatus) {
+   584→          const he = err as { httpStatus: number; httpBody: string };
+   585→          errorText = `❌ HTTP ${he.httpStatus}${he.httpBody ? ' — ' + he.httpBody : ''}`;
+   586→          isError = true;
+   587→        } else if (err) {
+   588→          errorText =
+   589→            '❌ خطا در ارتباط با سرور — مطمئن شوید سرور در حال اجرا است و اتصال اینترنت برقرار است. (' +
+   590→            (err as Error).message +
+   591→            ')';
+   592→          isError = true;
+   593→        } else if (!content.trim() && !st.reasoning) {
+   594→          content = 'پاسخ خالی از سرور دریافت شد';
+   595→          isError = true;
+   596→        }
+   597→      }
+   598→
+   599→      setChats((prev) =>
+   600→        prev.map((c) =>
+   601→          c.id !== st.chatId
+   602→            ? c
+   603→            : {
+   604→                ...c,
+   605→                updatedAt: Date.now(),
+   606→                messages: c.messages.map((m) =>
+   607→                  m.id !== st.msgId
+   608→                    ? m
+   609→                    : {
+   610→                        ...m,
+   611→                        content,
+   612→                        reasoning: st.reasoning || undefined,
+   613→                        errorText,
+   614→                        isError: isError || undefined,
+   615→                        stopped: stopped || undefined,
+   616→                        timeSec: secs,
+   617→                        chunks: st.chunks,
+   618→                        chars: content.length,
+   619→                      }
+   620→                ),
+   621→              }
+   622→        )
+   623→      );
+   624→    },
+   625→    []
+   626→  );
+   627→
+   628→  /* ----- هسته اجرای پاسخ ----- */
+   629→  const runCompletion = useCallback(
+   630→    async (chatId: string, history: Msg[]) => {
+   631→      const s = settingsRef.current;
+   632→      const aid = uid();
+   633→
+   634→      // پیام placeholder دستیار
+   635→      setChats((prev) =>
+   636→        prev.map((c) =>
+   637→          c.id !== chatId
+   638→            ? c
+   639→            : { ...c, updatedAt: Date.now(), messages: [...history, { id: aid, role: 'assistant' as Role, content: '', createdAt: Date.now() }] }
+   640→        )
+   641→      );
+   642→      setLiveMsgId(aid);
+   643→      setStreaming(true);
+   644→      streamRef.current = { chatId, msgId: aid, content: '', reasoning: '', chunks: 0, started: Date.now() };
+   645→
+   646→      const ac = new AbortController();
+   647→      abortRef.current = ac;
+   648→      nearBottomRef.current = true;
+   649→
+   650→      try {
+   651→        /* حافظه مکالمه: کل تاریخچه (فقط role و content) + system prompt اختیاری */
+   652→        const payloadMsgs: Array<{ role: string; content: string }> = [];
+   653→        const sp = (s.systemPrompt || '').trim();
+   654→        if (sp) payloadMsgs.push({ role: 'system', content: sp });
+   655→        for (const m of history) {
+   656→          if (m.isError || m.errorText) continue;
+   657→          payloadMsgs.push({ role: m.role, content: m.content });
+   658→        }
+   659→
+   660→        const res = await fetch('/api/chat', {
+   661→          method: 'POST',
+   662→          headers: { 'Content-Type': 'application/json' },
+   663→          body: JSON.stringify({
+   664→            messages: payloadMsgs,
+   665→            modelId: s.modelId,
+   666→            thinking: s.thinking,
+   667→            deepSearch: s.deepSearch,
+   668→            stream: s.stream,
+   669→          }),
+   670→          signal: ac.signal,
+   671→        });
+   672→
+   673→        if (!res.ok) {
+   674→          let errBody = '';
+   675→          try {
+   676→            errBody = (await res.text()).slice(0, 300);
+   677→          } catch {
+   678→            /* noop */
+   679→          }
+   680→          throw Object.assign(new Error('http'), { httpStatus: res.status, httpBody: errBody });
+   681→        }
+   682→
+   683→        const parser = createSseParser({
+   684→          onEvent: (ev) => {
+   685→            const st = streamRef.current;
+   686→            if (!st) return;
+   687→            st.chunks++;
+   688→            if (ev.text) st.content += ev.text;
+   689→            if (ev.reasoning) st.reasoning += ev.reasoning;
+   690→            if (ev.error) st.error = ev.error;
+   691→            scheduleFlush();
+   692→          },
+   693→        });
+   694→
+   695→        if (s.stream && res.body) {
+   696→          /* استریم زنده */
+   697→          const reader = res.body.getReader();
+   698→          const dec = new TextDecoder('utf-8');
+   699→          for (;;) {
+   700→            const { done, value } = await reader.read();
+   701→            if (done) break;
+   702→            const chunk = dec.decode(value, { stream: true });
+   703→            appendRaw(chunk);
+   704→            parser.feed(chunk);
+   705→          }
+   706→          parser.end();
+   707→        } else {
+   708→          /* پاسخ JSON معمولی */
+   709→          const full = await res.text();
+   710→          appendRaw(full);
+   711→          parser.feed(full);
+   712→          parser.end();
+   713→        }
+   714→        flushNow();
+   715→        finishMsg(false);
+   716→      } catch (e) {
+   717→        flushNow();
+   718→        finishMsg(ac.signal.aborted || (e as Error).name === 'AbortError', e);
+   719→      } finally {
+   720→        streamRef.current = null;
+   721→        abortRef.current = null;
+   722→        setLiveMsgId(null);
+   723→        setStreaming(false);
+   724→      }
+   725→    },
+   726→    [appendRaw, finishMsg, flushNow, scheduleFlush]
+   727→  );
+   728→
+   729→  /* ----- توقف استریم ----- */
+   730→  const stopStream = useCallback(() => {
+   731→    abortRef.current?.abort();
+   732→  }, []);
+   733→
+   734→  /* ----- ارسال پیام ----- */
+   735→  const send = useCallback(
+   736→    (raw?: string) => {
+   737→      const text = (raw ?? input).trim();
+   738→      if (!text || streamingRef.current) return;
+   739→
+   740→      let chatId = activeIdRef.current;
+   741→      let base: Chat | undefined = chatsRef.current.find((c) => c.id === chatId);
+   742→      if (!base) {
+   743→        const c: Chat = { id: uid(), title: 'گفتگوی جدید', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+   744→        setChats((prev) => [c, ...prev]);
+   745→        setActiveId(c.id);
+   746→        chatId = c.id;
+   747→        base = c;
+   748→      }
+   749→
+   750→      const isFirst = base.messages.length === 0;
+   751→      const userMsg: Msg = { id: uid(), role: 'user', content: text, createdAt: Date.now() };
+   752→      const history = [...base.messages, userMsg];
+   753→
+   754→      setInput('');
+   755→      requestAnimationFrame(() => {
+   756→        const el = taRef.current;
+   757→        if (el) el.style.height = 'auto';
+   758→      });
+   759→
+   760→      setChats((prev) =>
+   761→        prev.map((c) =>
+   762→          c.id !== chatId ? c : { ...c, title: isFirst ? text.slice(0, 40) : c.title, messages: history, updatedAt: Date.now() }
+   763→        )
+   764→      );
+   765→      void runCompletion(chatId, history);
+   766→    },
+   767→    [input, runCompletion]
+   768→  );
+   769→
+   770→  /* ----- گفتگوها ----- */
+   771→  const newChat = useCallback(() => {
+   772→    if (streamingRef.current) return;
+   773→    const c: Chat = { id: uid(), title: 'گفتگوی جدید', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+   774→    setChats((prev) => [c, ...prev]);
+   775→    setActiveId(c.id);
+   776→    setSidebarOpen(false);
+   777→  }, []);
+   778→
+   779→  const deleteChat = useCallback(
+   780→    (id: string) => {
+   781→      if (streamingRef.current && id === activeIdRef.current) return;
+   782→      setChats((prev) => {
+   783→        const next = prev.filter((c) => c.id !== id);
+   784→        if (!next.length) {
+   785→          const c: Chat = { id: uid(), title: 'گفتگوی جدید', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+   786→          setActiveId(c.id);
+   787→          return [c];
+   788→        }
+   789→        if (id === activeIdRef.current) setActiveId(next[0].id);
+   790→        return next;
+   791→      });
+   792→      toast('گفتگو حذف شد');
+   793→    },
+   794→    [toast]
+   795→  );
+   796→
+   797→  const clearAllChats = useCallback(() => {
+   798→    if (!window.confirm('همه گفتگوها پاک شوند؟ این عمل قابل بازگشت نیست.')) return;
+   799→    const c: Chat = { id: uid(), title: 'گفتگوی جدید', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+   800→    setChats([c]);
+   801→    setActiveId(c.id);
+   802→    setSidebarOpen(false);
+   803→    toast('همه گفتگوها پاک شد');
+   804→  }, [toast]);
+   805→
+   806→  const switchChat = useCallback((id: string) => {
+   807→    if (streamingRef.current) return;
+   808→    setActiveId(id);
+   809→    setEditingId(null);
+   810→    setSidebarOpen(false);
+   811→  }, []);
+   812→
+   813→  /* ----- اکشن پیام‌ها ----- */
+   814→  const copyMsg = useCallback(
+   815→    async (m: Msg) => {
+   816→      const ok = await copyText(m.content);
+   817→      toast(ok ? 'پیام کپی شد ✓' : 'کپی ناموفق بود', ok ? 'ok' : 'err');
+   818→    },
+   819→    [toast]
+   820→  );
+   821→
+   822→  const deleteMsg = useCallback((id: string) => {
+   823→    if (streamingRef.current) return;
+   824→    const cid = activeIdRef.current;
+   825→    setChats((prev) => prev.map((c) => (c.id !== cid ? c : { ...c, messages: c.messages.filter((m) => m.id !== id) })));
+   826→  }, []);
+   827→
+   828→  const onEditStart = useCallback((m: Msg) => {
+   829→    setEditingId(m.id);
+   830→    setEditingText(m.content);
+   831→  }, []);
+   832→
+   833→  const onEditCancel = useCallback(() => setEditingId(null), []);
+   834→
+   835→  const onEditSave = useCallback(
+   836→    (id: string) => {
+   837→      const newText = editingText.trim();
+   838→      if (!newText || streamingRef.current) return;
+   839→      const chat = chatsRef.current.find((c) => c.id === activeIdRef.current);
+   840→      if (!chat) return;
+   841→      const idx = chat.messages.findIndex((m) => m.id === id);
+   842→      if (idx === -1) return;
+   843→      const history = [...chat.messages.slice(0, idx), { ...chat.messages[idx], content: newText }];
+   844→      setEditingId(null);
+   845→      setChats((prev) => prev.map((c) => (c.id !== chat.id ? c : { ...c, messages: history, updatedAt: Date.now() })));
+   846→      toast('پیام ویرایش شد — پاسخ دوباره تولید می‌شود');
+   847→      void runCompletion(chat.id, history);
+   848→    },
+   849→    [editingText, runCompletion, toast]
+   850→  );
+   851→
+   852→  const onRegenerate = useCallback(
+   853→    (id: string) => {
+   854→      if (streamingRef.current) return;
+   855→      const chat = chatsRef.current.find((c) => c.id === activeIdRef.current);
+   856→      if (!chat) return;
+   857→      const idx = chat.messages.findIndex((m) => m.id === id);
+   858→      if (idx === -1) return;
+   859→      const history = chat.messages.slice(0, idx).filter((m) => !m.isError && !m.errorText);
+   860→      setChats((prev) => prev.map((c) => (c.id !== chat.id ? c : { ...c, messages: history, updatedAt: Date.now() })));
+   861→      void runCompletion(chat.id, history);
+   862→    },
+   863→    [runCompletion]
+   864→  );
+   865→
+   866→  /* ----- ping دستی ----- */
+   867→  const runPing = useCallback(async () => {
+   868→    setStatus('checking');
+   869→    try {
+   870→      const r = await fetch('/api/ping');
+   871→      const j = (await r.json()) as { status?: string; ms?: number; sample?: string };
+   872→      if (j?.status === 'ok') {
+   873→        setStatus('ok');
+   874→        toast(`اتصال برقرار است · ${j.ms ?? '?'} ms`);
+   875→      } else {
+   876→        setStatus('fail');
+   877→        toast('اتصال به سرویس برقرار نیست', 'err');
+   878→      }
+   879→    } catch {
+   880→      setStatus('fail');
+   881→      toast('خطا در بررسی اتصال', 'err');
+   882→    }
+   883→  }, [toast]);
+   884→
+   885→  /* ----- خروجی‌ها ----- */
+   886→  const exportMarkdown = useCallback(() => {
+   887→    const chat = chatsRef.current.find((c) => c.id === activeIdRef.current);
+   888→    if (!chat || !chat.messages.length) {
+   889→      toast('این گفتگو خالی است', 'err');
+   890→      return;
+   891→    }
+   892→    const s = settingsRef.current;
+   893→    const lines: string[] = [`# ${chat.title}`, '', `- مدل: \`${s.modelId}\``, `- تاریخ خروجی: ${fmtTime(Date.now())}`, '', '---', ''];
+   894→    for (const m of chat.messages) {
+   895→      lines.push(m.role === 'user' ? '## 👤 کاربر' : '## 🤖 دستیار');
+   896→      lines.push('');
+   897→      lines.push(m.content || (m.errorText ?? ''));
+   898→      if (!m.role.includes('x') && m.timeSec != null) {
+   899→        lines.push('');
+   900→        lines.push(`> ⏱ ${m.timeSec} ثانیه · 🧩 ${m.chunks} تکه · ✍️ ${m.chars} نویسه${m.stopped ? ' · ⏹ متوقف شد' : ''}`);
+   901→      }
+   902→      lines.push('');
+   903→    }
+   904→    const name = (chat.title || 'chat').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 40);
+   905→    downloadFile(`${name}.md`, lines.join('\n'), 'text/markdown');
+   906→    toast('فایل Markdown دانلود شد ✓');
+   907→  }, [toast]);
+   908→
+   909→  const exportJson = useCallback(() => {
+   910→    const all = chatsRef.current;
+   911→    if (!all.length) {
+   912→      toast('گفتگویی برای خروجی نیست', 'err');
+   913→      return;
+   914→    }
+   915→    const payload = { exportedAt: new Date().toISOString(), chats: all };
+   916→    downloadFile('fm-chats-backup.json', JSON.stringify(payload, null, 2), 'application/json');
+   917→    toast('فایل JSON دانلود شد ✓');
+   918→  }, [toast]);
+   919→
+   920→  /* ----- کپی بلوک کد (delegation) ----- */
+   921→  const onChatAreaClick = useCallback(
+   922→    async (e: React.MouseEvent) => {
+   923→      const btn = (e.target as HTMLElement).closest('button[data-code-id]');
+   924→      if (!btn) return;
+   925→      const code = getCodeById(btn.getAttribute('data-code-id') || '');
+   926→      if (code != null) {
+   927→        const ok = await copyText(code);
+   928→        if (ok) {
+   929→          btn.textContent = 'کپی شد ✓';
+   930→          setTimeout(() => {
+   931→            btn.textContent = 'کپی';
+   932→          }, 1500);
+   933→        } else {
+   934→          toast('کپی ناموفق بود', 'err');
+   935→        }
+   936→      }
+   937→    },
+   938→    [toast]
+   939→  );
+   940→
+   941→  /* ----- میان‌بر Esc: توقف استریم / بستن پنل‌ها ----- */
+   942→  useEffect(() => {
+   943→    const onKey = (e: KeyboardEvent) => {
+   944→      if (e.key !== 'Escape') return;
+   945→      if (streamingRef.current) {
+   946→        stopStream();
+   947→      } else if (settingsOpenRef.current) {
+   948→        setSettingsOpen(false);
+   949→      } else if (rawOpenRef.current) {
+   950→        setRawOpen(false);
+   951→      }
+   952→    };
+   953→    window.addEventListener('keydown', onKey);
+   954→    return () => window.removeEventListener('keydown', onKey);
+   955→  }, [stopStream]);
+   956→
+   957→  /* ----- قطع درخواست هنگام بستن صفحه ----- */
+   958→  useEffect(() => () => abortRef.current?.abort(), []);
+   959→
+   960→  /* ----- auto-resize textarea ----- */
+   961→  const autoResize = useCallback(() => {
+   962→    const el = taRef.current;
+   963→    if (!el) return;
+   964→    el.style.height = 'auto';
+   965→    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+   966→  }, []);
+   967→
+   968→  const onTaKeyDown = useCallback(
+   969→    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+   970→      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+   971→        e.preventDefault();
+   972→        send();
+   973→      }
+   974→    },
+   975→    [send]
+   976→  );
+   977→
+   978→  /* ----- وضعیت اتصال ----- */
+   979→  const statusMeta = {
+   980→    ok: { dot: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,.8)]', text: 'متصل' },
+   981→    checking: { dot: 'bg-amber-400 animate-pulse', text: 'در حال بررسی…' },
+   982→    fail: { dot: 'bg-red-500', text: 'بدون اتصال' },
+   983→  }[status];
+   984→
+   985→  const messages = activeChat?.messages ?? [];
+   986→
+   987→  /* ================= رندر ================= */
+   988→  return (
+   989→    <div className="flex h-dvh flex-col overflow-hidden bg-[#0b1220] text-slate-200">
+   990→      {/* ---------- هدر ---------- */}
+   991→      <header className="z-30 flex shrink-0 flex-wrap items-center gap-2 border-b border-[#243352] bg-[#0d1526]/95 px-3 py-2 backdrop-blur sm:px-4">
+   992→        <button
+   993→          aria-label="باز کردن منوی گفتگوها"
+   994→          onClick={() => setSidebarOpen(true)}
+   995→          className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#243352] text-slate-300 hover:bg-[#1a2440] md:hidden"
+   996→        >
+   997→          <Menu className="h-4.5 w-4.5" />
+   998→        </button>
+   999→
+  1000→        <div className="hidden items-center gap-2 lg:flex">
+  1001→          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#3b82f6] to-[#38bdf8]">
+  1002→            <Sparkles className="h-4 w-4 text-white" />
+  1003→          </span>
+  1004→          <span className="text-sm font-extrabold text-slate-100">چت هوشمند</span>
+  1005→        </div>
+  1006→
+  1007→        {/* مدل */}
+  1008→        <input
+  1009→          list="fm-models"
+  1010→          dir="ltr"
+  1011→          aria-label="شناسه مدل"
+  1012→          value={settings.modelId}
+  1013→          onChange={(e) => setSettings((s) => ({ ...s, modelId: e.target.value }))}
+  1014→          placeholder="modelId"
+  1015→          className="h-9 w-[180px] rounded-lg border border-[#243352] bg-[#111a2e] px-3 text-left font-mono text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#3b82f6] focus:outline-none sm:w-[210px]"
+  1016→        />
+  1017→        <datalist id="fm-models">
+  1018→          {MODELS.map((m) => (
+  1019→            <option key={m} value={m} />
+  1020→          ))}
+  1021→        </datalist>
+  1022→
+  1023→        {/* گزینه‌ها */}
+  1024→        <div className="hidden items-center gap-3 rounded-lg border border-[#243352] bg-[#111a2e] px-3 py-1.5 sm:flex">
+  1025→          <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-slate-300">
+  1026→            <input
+  1027→              type="checkbox"
+  1028→              checked={settings.thinking}
+  1029→              onChange={(e) => setSettings((s) => ({ ...s, thinking: e.target.checked }))}
+  1030→              className="h-3.5 w-3.5 accent-[#3b82f6]"
+  1031→            />
+  1032→            تفکر
+  1033→          </label>
+  1034→          <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-slate-300">
+  1035→            <input
+  1036→              type="checkbox"
+  1037→              checked={settings.deepSearch}
+  1038→              onChange={(e) => setSettings((s) => ({ ...s, deepSearch: e.target.checked }))}
+  1039→              className="h-3.5 w-3.5 accent-[#3b82f6]"
+  1040→            />
+  1041→            جستجوی عمیق
+  1042→          </label>
+  1043→          <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-slate-300">
+  1044→            <input
+  1045→              type="checkbox"
+  1046→              checked={settings.stream}
+  1047→              onChange={(e) => setSettings((s) => ({ ...s, stream: e.target.checked }))}
+  1048→              className="h-3.5 w-3.5 accent-[#3b82f6]"
+  1049→            />
+  1050→            استریم
+  1051→          </label>
+  1052→        </div>
+  1053→
+  1054→        <div className="flex-1" />
+  1055→
+  1056→        {/* اتصال */}
+  1057→        <button
+  1058→          onClick={runPing}
+  1059→          className="flex h-9 items-center gap-1.5 rounded-lg border border-[#243352] px-2.5 text-xs text-slate-300 transition-colors hover:border-[#3b82f6] hover:bg-[#1a2440]"
+  1060→          title="تست اتصال به سرویس"
+  1061→        >
+  1062→          <Activity className="h-3.5 w-3.5" />
+  1063→          اتصال؟
+  1064→        </button>
+  1065→
+  1066→        {/* Raw SSE */}
+  1067→        <button
+  1068→          onClick={toggleRaw}
+  1069→          className={`flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors ${
+  1070→            rawOpen
+  1071→              ? 'border-[#3b82f6] bg-[#14203c] text-[#38bdf8]'
+  1072→              : 'border-[#243352] text-slate-300 hover:border-[#3b82f6] hover:bg-[#1a2440]'
+  1073→          }`}
+  1074→          title="پنل دیتای خام استریم"
+  1075→        >
+  1076→          <Code2 className="h-3.5 w-3.5" />
+  1077→          <span className="hidden sm:inline">Raw SSE</span>
+  1078→        </button>
+  1079→
+  1080→        {/* تنظیمات */}
+  1081→        <button
+  1082→          aria-label="تنظیمات"
+  1083→          onClick={() => {
+  1084→            setDraftPrompt(settings.systemPrompt);
+  1085→            setSettingsOpen(true);
+  1086→          }}
+  1087→          className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#243352] text-slate-300 transition-colors hover:border-[#3b82f6] hover:bg-[#1a2440]"
+  1088→          title="تنظیمات"
+  1089→        >
+  1090→          <Settings className="h-4 w-4" />
+  1091→        </button>
+  1092→
+  1093→        {/* نشانگر وضعیت */}
+  1094→        <div className="flex items-center gap-1.5 rounded-lg border border-[#243352] bg-[#111a2e] px-2.5 py-1.5" title={statusMeta.text}>
+  1095→          <span className={`h-2 w-2 rounded-full ${statusMeta.dot}`} />
+  1096→          <span className="hidden text-xs text-slate-400 sm:inline">{statusMeta.text}</span>
+  1097→        </div>
+  1098→      </header>
+  1099→
+  1100→      {/* ---------- بدنه ---------- */}
+  1101→      <div className="flex min-h-0 flex-1">
+  1102→        {/* پوشش موبایل سایدبار */}
+  1103→        {sidebarOpen && (
+  1104→          <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden" onClick={() => setSidebarOpen(false)} />
+  1105→        )}
+  1106→
+  1107→        {/* ---------- سایدبار راست ---------- */}
+  1108→        <aside
+  1109→          className={`fixed inset-y-0 right-0 z-50 flex w-[260px] flex-col border-l border-[#243352] bg-[#0d1526] transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
+  1110→            sidebarOpen ? 'translate-x-0' : 'translate-x-full'
+  1111→          }`}
+  1112→        >
+  1113→          <div className="flex items-center justify-between border-b border-[#243352] p-3">
+  1114→            <span className="flex items-center gap-2 text-sm font-extrabold text-slate-100">
+  1115→              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-[#3b82f6] to-[#38bdf8]">
+  1116→                <Sparkles className="h-3.5 w-3.5 text-white" />
+  1117→              </span>
+  1118→              گفتگوها
+  1119→            </span>
+  1120→            <button
+  1121→              aria-label="بستن"
+  1122→              onClick={() => setSidebarOpen(false)}
+  1123→              className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-[#1a2440] md:hidden"
+  1124→            >
+  1125→              <X className="h-4 w-4" />
+  1126→            </button>
+  1127→          </div>
+  1128→
+  1129→          <div className="p-3">
+  1130→            <button
+  1131→              onClick={newChat}
+  1132→              disabled={streaming}
+  1133→              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#3b82f6] py-2.5 text-sm font-bold text-white transition-colors hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-40"
+  1134→            >
+  1135→              <Plus className="h-4 w-4" /> چت جدید
+  1136→            </button>
+  1137→          </div>
+  1138→
+  1139→          <nav aria-label="لیست گفتگوها" className="chat-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 pb-3">
+  1140→            {chats.map((c) => {
+  1141→              const isActive = c.id === activeChat?.id;
+  1142→              return (
+  1143→                <div
+  1144→                  key={c.id}
+  1145→                  onClick={() => switchChat(c.id)}
+  1146→                  role="button"
+  1147→                  tabIndex={0}
+  1148→                  onKeyDown={(e) => e.key === 'Enter' && switchChat(c.id)}
+  1149→                  className={`group/item flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm transition-colors ${
+  1150→                    isActive
+  1151→                      ? 'border-[#3b82f6]/60 bg-[#14203c] text-slate-100'
+  1152→                      : 'border-transparent bg-transparent text-slate-400 hover:bg-[#111a2e] hover:text-slate-200'
+  1153→                  }`}
+  1154→                >
+  1155→                  <MessageSquare className={`h-4 w-4 shrink-0 ${isActive ? 'text-[#38bdf8]' : 'opacity-50'}`} />
+  1156→                  <span className="min-w-0 flex-1 truncate">{c.title}</span>
+  1157→                  <button
+  1158→                    aria-label={`حذف گفتگوی ${c.title}`}
+  1159→                    onClick={(e) => {
+  1160→                      e.stopPropagation();
+  1161→                      deleteChat(c.id);
+  1162→                    }}
+  1163→                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-500 opacity-0 transition-opacity hover:bg-red-500/15 hover:text-red-300 group-hover/item:opacity-100"
+  1164→                  >
+  1165→                    <X className="h-3.5 w-3.5" />
+  1166→                  </button>
+  1167→                </div>
+  1168→              );
+  1169→            })}
+  1170→          </nav>
+  1171→
+  1172→          {/* خروجی‌ها */}
+  1173→          <div className="space-y-2 border-t border-[#243352] p-3">
+  1174→            <div className="grid grid-cols-2 gap-2">
+  1175→              <button
+  1176→                onClick={exportMarkdown}
+  1177→                className="flex items-center justify-center gap-1.5 rounded-lg border border-[#243352] py-2 text-xs text-slate-300 transition-colors hover:border-[#3b82f6] hover:bg-[#1a2440]"
+  1178→                title="خروجی Markdown از گفتگوی فعلی"
+  1179→              >
+  1180→                <Download className="h-3.5 w-3.5" /> Markdown
+  1181→              </button>
+  1182→              <button
+  1183→                onClick={exportJson}
+  1184→                className="flex items-center justify-center gap-1.5 rounded-lg border border-[#243352] py-2 text-xs text-slate-300 transition-colors hover:border-[#3b82f6] hover:bg-[#1a2440]"
+  1185→                title="خروجی JSON از همه گفتگوها"
+  1186→              >
+  1187→                <FileJson className="h-3.5 w-3.5" /> JSON
+  1188→              </button>
+  1189→            </div>
+  1190→            <button
+  1191→              onClick={clearAllChats}
+  1192→              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-500/30 py-2 text-xs text-red-300 transition-colors hover:bg-red-500/10"
+  1193→            >
+  1194→              <Trash2 className="h-3.5 w-3.5" /> پاک کردن همه
+  1195→            </button>
+  1196→          </div>
+  1197→        </aside>
+  1198→
+  1199→        {/* ---------- ناحیه اصلی چت ---------- */}
+  1200→        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+  1201→          <div
+  1202→            ref={scrollRef}
+  1203→            onScroll={onScroll}
+  1204→            onClick={onChatAreaClick}
+  1205→            role="log"
+  1206→            aria-live="polite"
+  1207→            aria-label="گفتگو"
+  1208→            className="chat-scroll min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5"
+  1209→          >
+  1210→            <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-5">
+  1211→              {messages.length === 0 && !streaming ? (
+  1212→                <WelcomeScreen onPick={(t) => send(t)} />
+  1213→              ) : (
+  1214→                messages.map((m, i) => (
+  1215→                  <MessageItem
+  1216→                    key={m.id}
+  1217→                    msg={m}
+  1218→                    live={m.id === liveMsgId}
+  1219→                    isLastAssistant={m.role === 'assistant' && i === messages.length - 1}
+  1220→                    editing={editingId === m.id}
+  1221→                    editingText={editingText}
+  1222→                    onEditingTextChange={setEditingText}
+  1223→                    onCopy={copyMsg}
+  1224→                    onEditStart={onEditStart}
+  1225→                    onEditSave={onEditSave}
+  1226→                    onEditCancel={onEditCancel}
+  1227→                    onDelete={deleteMsg}
+  1228→                    onRegenerate={onRegenerate}
+  1229→                  />
+  1230→                ))
+  1231→              )}
+  1232→            </div>
+  1233→          </div>
+  1234→
+  1235→          {/* ---------- کامپوزر پایین ---------- */}
+  1236→          <div className="shrink-0 border-t border-[#243352] bg-[#0d1526] px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
+  1237→            <div className="mx-auto flex max-w-3xl items-end gap-2">
+  1238→              <textarea
+  1239→                ref={taRef}
+  1240→                dir="auto"
+  1241→                rows={1}
+  1242→                value={input}
+  1243→                onChange={(e) => {
+  1244→                  setInput(e.target.value);
+  1245→                  autoResize();
+  1246→                }}
+  1247→                onKeyDown={onTaKeyDown}
+  1248→                placeholder="پیام خود را بنویسید… (Enter ارسال · Shift+Enter خط جدید)"
+  1249→                aria-label="متن پیام"
+  1250→                className="chat-scroll max-h-[200px] min-h-[46px] flex-1 resize-none rounded-2xl border border-[#243352] bg-[#111a2e] px-4 py-3 text-[15px] leading-7 text-slate-100 placeholder:text-slate-500 focus:border-[#3b82f6] focus:outline-none"
+  1251→              />
+  1252→              {streaming ? (
+  1253→                <button
+  1254→                  onClick={stopStream}
+  1255→                  className="flex h-[46px] shrink-0 items-center gap-2 rounded-2xl bg-red-500/90 px-4 text-sm font-bold text-white transition-colors hover:bg-red-500"
+  1256→                  title="توقف پاسخ (Esc)"
+  1257→                >
+  1258→                  <Square className="h-4 w-4 fill-current" />
+  1259→                  توقف
+  1260→                </button>
+  1261→              ) : (
+  1262→                <button
+  1263→                  onClick={() => send()}
+  1264→                  disabled={!input.trim()}
+  1265→                  aria-label="ارسال پیام"
+  1266→                  className="flex h-[46px] w-[52px] shrink-0 items-center justify-center rounded-2xl bg-[#3b82f6] text-white transition-colors hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-40"
+  1267→                >
+  1268→                  <Send className="h-[18px] w-[18px] -scale-x-100" />
+  1269→                </button>
+  1270→              )}
+  1271→            </div>
+  1272→            <p className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-slate-500">
+  1273→              پاسخ‌ها زنده استریم می‌شوند · Esc برای توقف — پاسخ‌های هوش مصنوعی ممکن است نادرست باشند.
+  1274→            </p>
+  1275→          </div>
+  1276→        </main>
+  1277→      </div>
+  1278→
+  1279→      {/* پنل Raw SSE */}
+  1280→      {rawOpen && <RawPanel preRef={rawPreRef} onClear={clearRaw} onClose={() => setRawOpen(false)} byteCount={rawBytes} />}
+  1281→
+  1282→      {/* مودال تنظیمات */}
+  1283→      {settingsOpen && (
+  1284→        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+  1285→          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSettingsOpen(false)} />
+  1286→          <div
+  1287→            role="dialog"
+  1288→            aria-modal="true"
+  1289→            aria-label="تنظیمات"
+  1290→            className="relative w-full max-w-lg space-y-4 rounded-2xl border border-[#243352] bg-[#111a2e] p-5 shadow-2xl"
+  1291→          >
+  1292→            <div className="flex items-center justify-between">
+  1293→              <h3 className="flex items-center gap-2 text-base font-extrabold text-slate-100">
+  1294→                <Settings className="h-4.5 w-4.5 text-[#38bdf8]" /> تنظیمات
+  1295→              </h3>
+  1296→              <button
+  1297→                aria-label="بستن"
+  1298→                onClick={() => setSettingsOpen(false)}
+  1299→                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-[#1a2440] hover:text-slate-200"
+  1300→              >
+  1301→                <X className="h-4 w-4" />
+  1302→              </button>
+  1303→            </div>
+  1304→
+  1305→            <div className="space-y-2">
+  1306→              <label htmlFor="sys-prompt" className="block text-sm font-bold text-slate-300">
+  1307→                System Prompt (اختیاری)
+  1308→              </label>
+  1309→              <textarea
+  1310→                id="sys-prompt"
+  1311→                dir="auto"
+  1312→                rows={5}
+  1313→                value={draftPrompt}
+  1314→                onChange={(e) => setDraftPrompt(e.target.value)}
+  1315→                placeholder="مثلاً: همیشه به فارسی و خلاصه پاسخ بده…"
+  1316→                className="chat-scroll w-full resize-none rounded-xl border border-[#243352] bg-[#0d1730] px-3 py-2.5 text-sm leading-7 text-slate-100 placeholder:text-slate-500 focus:border-[#3b82f6] focus:outline-none"
+  1317→              />
+  1318→              <p className="text-[11px] leading-6 text-slate-500">
+  1319→                این متن در هر درخواست به‌صورت اولین پیام <code className="md-icode">{'{role:"system"}'}</code> به مدل ارسال
+  1320→                می‌شود. گفتگوها و تنظیمات به‌صورت محلی در مرورگر شما ذخیره می‌شوند.
+  1321→              </p>
+  1322→            </div>
+  1323→
+  1324→            <div className="flex items-center justify-end gap-2">
+  1325→              <button
+  1326→                onClick={() => setSettingsOpen(false)}
+  1327→                className="rounded-lg border border-[#243352] px-4 py-2 text-sm text-slate-300 hover:bg-[#1a2440]"
+  1328→              >
+  1329→                انصراف
+  1330→              </button>
+  1331→              <button
+  1332→                onClick={() => {
+  1333→                  setSettings((s) => ({ ...s, systemPrompt: draftPrompt.trim() }));
+  1334→                  setSettingsOpen(false);
+  1335→                  toast('تنظیمات ذخیره شد ✓');
+  1336→                }}
+  1337→                className="rounded-lg bg-[#3b82f6] px-4 py-2 text-sm font-bold text-white hover:bg-[#2563eb]"
+  1338→              >
+  1339→                ذخیره
+  1340→              </button>
+  1341→            </div>
+  1342→          </div>
+  1343→        </div>
+  1344→      )}
+  1345→
+  1346→      {/* توست‌ها */}
+  1347→      <div className="pointer-events-none fixed inset-x-0 bottom-24 z-[70] flex flex-col items-center gap-2 px-4">
+  1348→        {toasts.map((t) => (
+  1349→          <div
+  1350→            key={t.id}
+  1351→            className={`pointer-events-auto rounded-xl border px-4 py-2 text-sm shadow-xl backdrop-blur ${
+  1352→              t.kind === 'err'
+  1353→                ? 'border-red-500/50 bg-[#2a1220]/95 text-red-200'
+  1354→                : 'border-emerald-500/40 bg-[#0f2018]/95 text-emerald-200'
+  1355→            }`}
+  1356→          >
+  1357→            {t.text}
+  1358→          </div>
+  1359→        ))}
+  1360→      </div>
+  1361→    </div>
+  1362→  );
+  1363→}
+  1364→
