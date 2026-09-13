@@ -7,9 +7,10 @@
  */
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Activity, Bot, Brain, Check, Code2, Copy, Download, FileJson, Languages, Mail, Menu,
-  MessageSquare, Pencil, Plus, RotateCcw, Send, Settings, Sparkles, Square, Trash2, X,
+  Activity, Bot, Brain, Check, ChevronDown, Code2, Copy, Download, FileJson, Globe, Languages, Mail, Menu,
+  MessageSquare, Pencil, Plus, RotateCcw, Send, Settings, Sparkles, Square, Trash2, X, Zap,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { appendCursor, renderMarkdown, getCodeById } from '@/lib/markdown';
 import { createSseParser } from '@/lib/sse';
 
@@ -47,14 +48,21 @@ interface Settings {
 }
 
 /* ---------- ثابت‌ها ---------- */
+/* مدل‌ها با گروه و لوگو — دقیقاً مطابق پیکر مدل سایت freemodels */
 const MODELS = [
-  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic' },
-  { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic' },
-  { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic' },
-  { id: 'gpt-5.6-sol',      name: 'GPT 5.6 Sol',      vendor: 'OpenAI' },
-  { id: 'gpt-5.6-terra',    name: 'GPT 5.6 Terra',    vendor: 'OpenAI' },
-  { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI' },
-  { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI' },
+  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
+  { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
+  { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
+  { id: 'gpt-5.6-sol',      name: 'GPT 5.6 Sol',      vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
+  { id: 'gpt-5.6-terra',    name: 'GPT 5.6 Terra',    vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
+  { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI',        group: 'Other Pro Models', logo: '/zai.png' },
+  { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI', group: 'Other Pro Models', logo: '/kimi-logo-png_seeklogo-611650.png' },
+];
+/* گروه‌های پیکر مدل به‌ترتیب نمایش (آیکن هر گروه مثل سایت) */
+const MODEL_GROUPS: Array<{ title: string; icon: LucideIcon }> = [
+  { title: 'Claude Pro',       icon: Sparkles },
+  { title: 'ChatGPT Pro',      icon: Zap },
+  { title: 'Other Pro Models', icon: Globe },
 ];
 const DEFAULT_SETTINGS: Settings = {
   modelId: 'claude-fable-5.1',
@@ -404,6 +412,7 @@ export default function ChatApp() {
   const [toasts, setToasts] = useState<Array<{ id: number; text: string; kind: 'ok' | 'err' }>>([]);
   const [rawBytes, setRawBytes] = useState(0);
   const [apiKeys, setApiKeys] = useState<{ openai: string; anthropic: string } | null>(null);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false); // پیکر مدل باز است؟
 
   /* ----- refs ----- */
   const chatsRef = useRef<Chat[]>([]);
@@ -412,6 +421,8 @@ export default function ChatApp() {
   const streamingRef = useRef(false);
   const rawOpenRef = useRef(false);
   const settingsOpenRef = useRef(false);
+  const modelPickerOpenRef = useRef(false); // پیکر مدل باز است؟ (برای Esc)
+  const pickerRef = useRef<HTMLDivElement | null>(null); // پیکر مدل (برای تشخیص کلیک بیرون)
   const abortRef = useRef<AbortController | null>(null);
   const streamRef = useRef<{ chatId: string; msgId: string; content: string; reasoning: string; chunks: number; error?: string; started: number } | null>(null);
   const rafRef = useRef(0);
@@ -428,6 +439,17 @@ export default function ChatApp() {
   streamingRef.current = streaming;
   rawOpenRef.current = rawOpen;
   settingsOpenRef.current = settingsOpen;
+  modelPickerOpenRef.current = modelPickerOpen;
+
+  /* ----- بستن پیکر مدل با کلیک بیرون از آن ----- */
+  useEffect(() => {
+    if (!modelPickerOpen) return;
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setModelPickerOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [modelPickerOpen]);
 
   // بارگیری کلیدهای API هنگام باز شدن مودال تنظیمات (برای بخش API)
   useEffect(() => {
@@ -962,6 +984,8 @@ export default function ChatApp() {
       if (e.key !== 'Escape') return;
       if (streamingRef.current) {
         stopStream();
+      } else if (modelPickerOpenRef.current) {
+        setModelPickerOpen(false);
       } else if (settingsOpenRef.current) {
         setSettingsOpen(false);
       } else if (rawOpenRef.current) {
@@ -1002,6 +1026,9 @@ export default function ChatApp() {
 
   const messages = activeChat?.messages ?? [];
 
+  /* ----- مدل فعلی برای دکمهٔ پیکر (اگر id دستی ذخیره شده باشد، همان خام نشان داده می‌شود) ----- */
+  const currentModel = MODELS.find((m) => m.id === settings.modelId);
+
   /* ================= رندر ================= */
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[#0b1220] text-slate-200">
@@ -1022,21 +1049,93 @@ export default function ChatApp() {
           <span className="text-sm font-extrabold text-slate-100">چت هوشمند</span>
         </div>
 
-        {/* مدل */}
-        <input
-          list="fm-models"
-          dir="ltr"
-          aria-label="شناسه مدل"
-          value={settings.modelId}
-          onChange={(e) => setSettings((s) => ({ ...s, modelId: e.target.value }))}
-          placeholder="modelId"
-          className="h-9 w-[180px] rounded-lg border border-[#243352] bg-[#111a2e] px-3 text-left font-mono text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#3b82f6] focus:outline-none sm:w-[210px]"
-        />
-        <datalist id="fm-models">
-          {MODELS.map((m) => (
-            <option key={m.id} value={m.id} label={m.name + ' — ' + m.vendor} />
-          ))}
-        </datalist>
+        {/* مدل — پیکر گروهی مثل سایت freemodels */}
+        <div ref={pickerRef} className="relative">
+          <button
+            type="button"
+            aria-haspopup="listbox"
+            aria-expanded={modelPickerOpen}
+            aria-label="انتخاب مدل"
+            onClick={() => setModelPickerOpen((o) => !o)}
+            className="flex h-9 min-w-[150px] max-w-[220px] items-center gap-2 rounded-lg border border-[#243352] bg-[#111a2e] px-2.5 transition-colors hover:border-[#3b82f6]"
+          >
+            {currentModel && (
+              <img
+                src={currentModel.logo}
+                alt=""
+                width={20}
+                height={20}
+                className="h-5 w-5 shrink-0 rounded-md border border-[#0A0A0B]/10 bg-white object-contain p-0.5"
+              />
+            )}
+            <span dir="ltr" className="min-w-0 flex-1 truncate text-left text-xs font-medium text-slate-100">
+              {currentModel ? currentModel.name : settings.modelId}
+            </span>
+            <ChevronDown
+              className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${modelPickerOpen ? 'rotate-180' : ''}`}
+              aria-hidden="true"
+            />
+          </button>
+
+          {modelPickerOpen && (
+            <div
+              role="listbox"
+              aria-label="مدل‌ها"
+              dir="ltr"
+              className="absolute right-0 top-full z-50 mt-2 max-h-[min(55dvh,320px)] w-[264px] overscroll-contain overflow-auto rounded-xl border border-black/10 bg-white p-1.5 shadow-[0_16px_40px_rgba(0,0,0,.35)]"
+            >
+              {MODEL_GROUPS.map((g) => (
+                <div key={g.title} className="mb-1.5 last:mb-0">
+                  <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-[#0A0A0B]/60">
+                    <g.icon className="h-3 w-3" aria-hidden="true" />
+                    {g.title}
+                  </div>
+                  <div className="space-y-0.5">
+                    {MODELS.filter((m) => m.group === g.title).map((m) => {
+                      const sel = m.id === settings.modelId;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          role="option"
+                          aria-selected={sel}
+                          onClick={() => {
+                            setSettings((s) => ({ ...s, modelId: m.id }));
+                            setModelPickerOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-2 rounded-lg px-2 py-2.5 text-left transition-colors min-h-[44px] sm:min-h-0 sm:py-2 ${
+                            sel ? 'bg-[#0A0A0B] text-white' : 'text-[#0A0A0B] hover:bg-[#FFFBF5] active:bg-[#F5F3EF]'
+                          }`}
+                        >
+                          <img
+                            alt={m.name}
+                            width={20}
+                            height={20}
+                            src={m.logo}
+                            className="h-5 w-5 shrink-0 rounded-md border border-[#0A0A0B]/10 bg-white object-contain p-0.5"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span
+                              className={`block truncate text-xs font-medium leading-none ${sel ? 'text-white' : 'text-[#0A0A0B]'}`}
+                            >
+                              {m.name}
+                            </span>
+                            <span
+                              className={`mt-0.5 block truncate text-[11px] leading-none ${sel ? 'text-white/60' : 'text-[#0A0A0B]/60'}`}
+                            >
+                              {m.vendor}
+                            </span>
+                          </span>
+                          {sel && <Check className="h-3.5 w-3.5 shrink-0 text-white" aria-hidden="true" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* گزینه‌ها */}
         <div className="hidden items-center gap-3 rounded-lg border border-[#243352] bg-[#111a2e] px-3 py-1.5 sm:flex">

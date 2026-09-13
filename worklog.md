@@ -133,3 +133,25 @@ Stage Summary:
 - هر دو نسخه حالا علاوه بر چت، یک API کامل سازگار با OpenAI و Anthropic هم سرویس می‌دهند؛ کلیدها: sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50 (OpenAI) و sk-ant-api03-9lamB2K7KoYT8fw8tAp2CKL5kKsOHKhN4mE9eawuzRuW0aU3umJirsEFbS3B6RCjLRw8lrJ0YRmsnxECIu3nHaKM (Anthropic) — در api-keys.json مشترک هر دو نسخه
 - app.js: 2901 خط / 120,243 بایت — node --check سالم (فایل اصلی + PAGE_JS استخراج‌شده)
 - محدودیت شناخته‌شده: آپستریم رایگان گاهی 429 «providers exhausted» می‌دهد؛ در استریم داخل خود پاسخ و در غیراستریم با کد وضعیت درست به فرمت API مقصد برگردانده می‌شود و چند ثانیه بعد retry موفق است
+
+---
+Task ID: 7
+Agent: main (Z.ai Code)
+Task: بازیابی ورک‌اسپیس از فایل tar آپلودی + پیاده‌سازی پیکر مدل گروهی (مطابق HTML واقعی سایت freemodels) در هر دو نسخه
+
+Work Log:
+- استخراج workspace-228826a1-fa07-438e-befa-cdfb489723b4.tar و انتقال کامل پروژه به ریشه سندباکس (/home/z/my-project)؛ نصب وابستگی‌ها با bun و بالاآمدن dev سرور روی 3000 (GET / → 200)
+- دانلود ۴ لوگوی واقعی ارائه‌دهنده از freemodels.pro (Claude-ai-logo.webp، ChatGPT-Logo.svg.webp، zai.png، kimi-logo-png_seeklogo-611650.png) و قراردادن‌ها در public/
+- Next.js (src/app/page.tsx): حذف input+datalist مدل؛ افزودن دکمهٔ پیکر (لوگو + نام مدل + chevron) و پاپ‌آپ role=listbox با dir=ltr و عرض ۲۶۴px و max-h min(55dvh,320px) با اسکرول — دقیقاً با رنگ‌ها/فاصله‌های HTML مرجع: هدر گروه text-[11px] uppercase با آیکن (Sparkles/Zap/Globe)، ردیف‌ها با لوگوی ۲۰px گردگوشه، نام text-xs و سازندهٔ text-[11px] با شفافیت ۶۰٪، ردیف انتخاب‌شده bg-[#0A0A0B] سفید + تیک Check، hover #FFFBF5 و active #F5F3EF، min-h-44px موبایل
+- STATE و رفتار: modelPickerOpen + pickerRef؛ بستن با کلیک بیرون (mousedown روی document) و Esc (اولویت قبل از مودال تنظیمات)؛ انتخاب مدل → setSettings + بستن پاپ‌آپ + ذخیره در fm_settings؛ اگر modelId دستی نامعلومی در localStorage باشد، دکمه همان id خام را بدون لوگو نشان می‌دهد
+- app.js (نسخهٔ تک‌فایل): همان UI با کلاس‌های mp-* در PAGE_CSS و رندر JS خالص (buildPicker/updateModelBtn/setPickerOpen) از روی MODELS سمت کلاینت (هم‌گروه با FM_MODELS سرور)؛ SVG آیکن‌های گروه‌ها همان pathهای lucide سایت مرجع؛ رعایت کامل قیود PAGE_JS (بدون backtick و ${ و </script — تأیید با استخراج و node --check جداگانه)
+- لوگوها در app.js به‌صورت base64 (نسخهٔ ۹۶px بهینه‌شده با PIL، ~۱۲KB مجموع) داخل EMBEDDED_LOGOS embed شدند و سرور همان مسیرهای مرجع (/Claude-ai-logo.webp و…) را با Cache-Control یک‌هفته‌ای سرو می‌کند — تک‌فایل مستقل ماند؛ /v1/models بدون تغییر (فقط فیلدهای مشخص — نشت base64 ندارد)
+- باگ stacking رفع شد: در flexbox حتی flex-item استاتیک با z-index هم stacking-context می‌سازد؛ #topbar (z-30) پاپ‌آپ را محبوس می‌کرد و #sidebar (z-50، آیتم flex بعدی) رویش می‌آمد → topbar به z-55 ارتقا یافت (زیر مودال ۶۰ و توست ۷۰)؛ لنگر پاپ‌آپ در هر دو نسخه به right-0 فیزیکی تغییر کرد تا در RTL به سمت چپ (روی چت) باز شود نه زیر سایدبار
+- تست مرورگری Next.js: باز شدن پاپ‌آپ با هر ۳ گروه و ۷ مدل و ۴ لوگو، اسکرول داخلی، انتخاب kimi-k3 (دکمه به‌روز + fm_settings ذخیره + ماندگاری پس از reload)، Esc و کلیک بیرون، ارسال پیام زنده با kimi-k3 (پاسخ کامل پایتون با هایلایت، ۱۷۶ تکه؛ یک بار خطای موقت «Service temporarily overloaded» آپستریم درست به حباب قرمز آمد)، موبایل ۳۹۰px با تاچ‌تارگت ۴۴px
+- تست مرورگری app.js: همان سناریوها همه پاس؛ انتخاب مدل + توست «مدل روی Kimi K3 تنظیم شد ✓» + ماندگاری + جای تیک بعد از reopen؛ GET / (82KB)، هر ۴ مسیر لوگو ۲۰۰ با content-type درست، OPTIONS 204، /api/ping ok، /v1/models تمیز؛ موبایل ۳۹۰px ✓
+- bun run lint: 0 خطا (فقط هشدار قدیمی فونت که عمداً به‌صورت لینک مستقیم مانده)؛ حذف پوشهٔ موقت workspace-restore بعد از انتقال
+
+Stage Summary:
+- هر دو نسخه حالا پیکر مدل گروهی دقیقاً مثل سایت freemodels دارند: Claude Pro (Sonnet 5، Fable 5، Fable 5.1) / ChatGPT Pro (Sol، Terra) / Other Pro Models (GLM 5.2، Kimi K3) با لوگو، سازنده، ردیف انتخاب‌شدهٔ تیره با تیک و اسکرول داخلی
+- فایل‌های تغییریافته: src/app/page.tsx، app.js، public/{4 لوگو}، scripts/embed_logos.py (ابزار embed)؛ api-keys.json و بقیهٔ منطق دست‌نخورده
+- known-issue ثابت: آپستریم رایگان گاهی «Service temporarily overloaded/429» می‌دهد — رفتار سرویس، نه باگ UI
