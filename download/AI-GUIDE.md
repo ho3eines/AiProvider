@@ -63,18 +63,20 @@
 | `claude-fable-5.1` | Claude Fable 5.1 | Anthropic | Claude Pro | **پیش‌فرض** — تعادل کف کیفیت برای کار عمومی |
 | `claude-sonnet-5` | Claude Sonnet 5 | Anthropic | Claude Pro | کدنویسی و استدلال ساخت‌یافته |
 | `claude-fable-5` | Claude Fable 5 | Anthropic | Claude Pro | نگارش خلاق و روایت |
-| `gpt-5.6-sol` | GPT 5.6 Sol | OpenAI | ChatGPT Pro | پاسخ سریع و محاوره‌ای |
-| `gpt-5.6-terra` | GPT 5.6 Terra | OpenAI | ChatGPT Pro | تحلیل چندمرحله‌ای و داده |
+| `sol`   | GPT 5.6 Sol | OpenAI | ChatGPT Pro | پاسخ سریع و محاوره‌ای |
+| `terra` | GPT 5.6 Terra | OpenAI | ChatGPT Pro | تحلیل چندمرحله‌ای و داده |
 | `glm-5.2` | GLM 5.2 | Z.AI | Other Pro Models | چندزبانه و کار سبک |
 | `kimi-k3` | Kimi K3 | Moonshot AI | Other Pro Models | متون بلند و جمع‌بندی |
 
 ### 3.2 نرمال‌سازی نام مدل (resolveModelId)
 
-تابع `resolveModelId` در `src/lib/models.ts` (معادل `app.js:83`) ورودی را نرم تطبیق می‌دهد: ابتدا trim و lowercase، سپس فاصله‌ها و زیرخط‌ها به خط تیره (`/[\s_]+/ → "-"`)، بعد جست‌وجو در id ها و نام‌های نمایشی. نتیجه: `"Claude Fable 5.1"` و `"claude_fable 5.1"` و `"claude-fable-5.1"` هر سه به `claude-fable-5.1` می‌رسند. ورودی خالی/نال ← مدل پیش‌فرض؛ ورودی ناشناخته دست‌نخورده عبور می‌کند (تصمیم عمدی: کلاینت‌هایی که نام مدل سفارشی می‌فرستند نباید 400 بگیرند — آپستریم خودش واکنش نشان می‌دهد).
+تابع `resolveModelId` در `src/lib/models.ts` (معادل `app.js:90`) ورودی را نرم تطبیق می‌دهد: ابتدا trim و lowercase، سپس فاصله‌ها و زیرخط‌ها به خط تیره (`/[\s_]+/ → "-"`)، سپس **جدول alias های قدیمی** (`LEGACY_ALIASES`: مثلاً `gpt-5.6-sol → sol`)، بعد جست‌وجو در id ها و نام‌های نمایشی. نتیجه: `"Claude Fable 5.1"` و `"claude_fable 5.1"` و ID قدیمی `"gpt-5.6-sol"` هر سه به id درست می‌رسند. ورودی خالی/نال ← مدل پیش‌فرض؛ ورودی ناشناخته دست‌نخورده عبور می‌کند.
+
+⚠️ **درس تسک ۱۲:** ورودی ناشناخته را آپستریم رد نمی‌کند — **بی‌سروصدا به مدل پیش‌فرض (Claude) fallback می‌کند** و کاربر متوجه نمی‌شود. پس ID مدل‌ها را هرگز حدس نزنید؛ همیشه از باندل رسمی freemodels.pro استخراج کنید (الگو: `scripts/_probe/extract_models.py`).
 
 ### 3.3 افزودن مدل جدید (Playbook)
 
-1. **منبع واحد:** رکورد `{ id, name, vendor, group }` را در `src/lib/models.ts` اضافه کنید و **دقیقاً همان رکورد** را در `FM_MODELS` داخل `app.js:66` کپی کنید. گروه باید یکی از سه گروه فعلی باشد یا در هر دو نسخه گروه جدید تعریف شود.
+1. **منبع واحد:** رکورد `{ id, name, vendor, group }` را در `src/lib/models.ts` اضافه کنید و **دقیقاً همان رکورد** را در `FM_MODELS` داخل `app.js:66` کپی کنید. گروه باید یکی از سه گروه فعلی باشد یا در هر دو نسخه گروه جدید تعریف شود. **ID را حتماً از باندل رسمی سایت بگیرید، نه از نام نمایشی** (تسک ۱۲: `gpt-5.6-sol` حدسی بود و به Claude fallback می‌شد؛ ID واقعی `sol` است).
 2. **لوگو (اختیاری):** فایل لوگو را در `public/` بگذارید (Next خودکار می‌بیند) و برای app.js با `scripts/embed_logos.py` به‌صورت base64 در `EMBEDDED_LOGOS` (`app.js:79`) تزریق کنید — مسیر فایل باید در هر دو نسخه یکسان بماند (`/vendor-logo.webp`).
 3. **پیکر گروهی:** اگر گروه جدید است، آیکن و برچسب گروه را در `page.tsx` (آرایهٔ گروه‌ها با آیکن‌های lucide) و معادل `buildPicker` در `PAGE_JS` app.js اضافه کنید.
 4. **صحت‌سنجی:** `GET /v1/models` باید مدل جدید را با `owned_by=freemodels-<vendor>` برگرداند؛ با نام نمایشی و با id هر دو باید بتوان چت کرد؛ `bun run lint` و `node --check app.js` هر دو سبز.

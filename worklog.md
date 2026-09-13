@@ -230,3 +230,22 @@ Work Log:
 Stage Summary:
 - تشخیص قطعی: جعل برچسب مدل در آپستریم freemodels — نه باگ پروژه؛ راه‌حل واقعی فقط تعویض آپستریم است
 - ابزار reusable scripts/probe_identity.py برای پروب آیندهٔ هویت/سلامت مدل‌های آپستریم باقی ماند
+
+---
+Task ID: 12
+Agent: main (Z.ai Code)
+Task: پیگیری کاربر («نه از مدل‌های انتخابی هست، عمیق بررسی کن») — کشف علت واقعی جعل هویت مدل‌های GPT و اصلاح ID مدل‌ها
+
+Work Log:
+- مسیر کامل مدل در هر دو نسخه بازبینی شد: UI → /api/chat → آپستریم و /v1/* → resolveModelId → آپستریم؛ فیلد بدنه (modelId) در همهٔ مسیرها درست بود
+- ریشه‌یابی واقعی: دانلود باندل رسمی freemodels.pro (assets/index-DZ7nXOFB.js) و استخراج لیست مدل واقعی سایت (scripts/_probe/extract_models.py) — ID واقعی GPT ها فقط «sol» و «terra» است؛ ما در تسک ۶ «gpt-5.6-sol/terra» را از روی اسکرین‌شات حدس زده بودیم → آپستریم ID ناشناس را بی‌سروصدا به مدل پیش‌فرض (Claude) fallback می‌کرد
+- اثبات پروب مستقیم: sol → «I am GPT 5.6 Sol by OpenAI» ✓ · terra → «I am GPT 5.6 Terra by OpenAI» ✓ (در مقابل gpt-5.6-terra → «I am Claude Sonnet 5»)
+- تصحیح نتیجهٔ تسک ۱۱: مشکل از برچسب‌گذاری آپستریم نبود؛ از ID های حدسی خودمان بود — حق با کاربر بود
+- فیکس در هر دو نسخه: src/lib/models.ts (id: sol/terra + LEGACY_ALIASES برای gpt-5.6-sol/terra) · page.tsx (MODELS + نرمال‌سازی fm_settings قدیمی) · /api/chat (نرمال‌سازی modelId هم‌سو با app.js) · app.js (FM_MODELS سرور + MODELS کلاینت + LEGACY_MODEL_ALIASES در resolveModelId + loadSettings)
+- گروه‌بندی UI بدون تغییر ماند — باندل سایت هم ۳ هدر گروه رندر می‌کند (Claude Pro / ChatGPT Pro / Other Pro Models؛ فیلدهای group:GLM/Kimi فقط data-تگ اند)
+- صحت‌سنجی: node --check + استخراج PAGE_JS (۰ backtick، ۰ ${) ✓ · bun run lint 0 خطا (بعد از ignores: scripts/** و download/** برای باندل تحقیقاتی) ✓ · /v1/models هر دو نسخه → sol/terra ✓ · E2E: v1/chat/completions با gpt-5.6-sol → «I am GPT 5.6 Sol by OpenAI» ✓ · /api/chat Next با gpt-5.6-terra → «I am GPT 5.6 Terra by OpenAI» ✓ · app.js مستقل روی 3120 با gpt-5.6-sol → پاسخ GPT ✓
+- مستندات: README (جدول مدل + نمونهٔ /v1/models + Known Issue ۵ بازنویسی‌شده) و AI-GUIDE (کاتالوگ + بخش 3.2 + Playbook 3.3 با هشدار «ID را حدس نزن») — ریشه + download/
+
+Stage Summary:
+- علت قطعی: ID های حدسی gpt-5.6-* → fallback خاموش آپستریم به Claude؛ فیکس: ID های واقعی sol/terra + alias سازگاری در هر دو نسخه — کلاینت‌های فعلی با ID قدیمی هم درست کار می‌کنند
+- ابزار ماندگار: scripts/probe_identity.py (پروب هویت) و scripts/_probe/extract_models.py (استخراج لیست واقعی سایت)

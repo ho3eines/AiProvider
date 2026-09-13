@@ -161,8 +161,8 @@ node --check app.js    # بررسی صحت سینتکس (قبل از هر است
 | `claude-sonnet-5` | Claude Sonnet 5 | Anthropic | Claude Pro |
 | `claude-fable-5` | Claude Fable 5 | Anthropic | Claude Pro |
 | `claude-fable-5.1` | Claude Fable 5.1 ⭐ پیش‌فرض | Anthropic | Claude Pro |
-| `gpt-5.6-sol` | GPT 5.6 Sol | OpenAI | ChatGPT Pro |
-| `gpt-5.6-terra` | GPT 5.6 Terra | OpenAI | ChatGPT Pro |
+| `sol`   | GPT 5.6 Sol | OpenAI | ChatGPT Pro |
+| `terra` | GPT 5.6 Terra | OpenAI | ChatGPT Pro |
 | `glm-5.2` | GLM 5.2 | Z.AI | Other Pro Models |
 | `kimi-k3` | Kimi K3 | Moonshot AI | Other Pro Models |
 
@@ -211,8 +211,8 @@ curl -s http://localhost:3000/v1/models
   { "id": "claude-sonnet-5", "object": "model", "created": 1789321278, "owned_by": "freemodels-anthropic" },
   { "id": "claude-fable-5",  "object": "model", "created": 1789321278, "owned_by": "freemodels-anthropic" },
   { "id": "claude-fable-5.1","object": "model", "created": 1789321278, "owned_by": "freemodels-anthropic" },
-  { "id": "gpt-5.6-sol",     "object": "model", "created": 1789321278, "owned_by": "freemodels-openai" },
-  { "id": "gpt-5.6-terra",   "object": "model", "created": 1789321278, "owned_by": "freemodels-openai" },
+  { "id": "sol",     "object": "model", "created": 1789321278, "owned_by": "freemodels-openai" },
+  { "id": "terra",   "object": "model", "created": 1789321278, "owned_by": "freemodels-openai" },
   { "id": "glm-5.2",         "object": "model", "created": 1789321278, "owned_by": "freemodels-z.ai" },
   { "id": "kimi-k3",         "object": "model", "created": 1789321278, "owned_by": "freemodels-moonshot-ai" }
 ] }
@@ -275,7 +275,7 @@ curl -N http://localhost:3000/v1/messages \
 2. **فرمت پاسخ آپستریم قفل به سبک OpenAI فعلی است.** پارسر `sse.ts` جهانی طراحی شده اما اگر آپستریم ساختارش را تغییر دهد، اولین نقطهٔ بررسی همین فایل است.
 3. **وابستگی فونت به شبکه در نسخهٔ Next:** فونت Vazirmatn با لینک مستقیم Google Fonts لود می‌شود (تصمیم عمدی برای مقاومت به قطعی نصب)؛ در محیط بدون اینترنت UI با فونت جایگزین رندر می‌شود. نسخهٔ app.js این مشکل را ندارد (لوگوها embed اند).
 4. **`usage` تخمینی است** (~۴ نویسه = ۱ توکن) چون آپستریم usage واقعی نمی‌دهد.
-5. **برچسب‌های GPT در آپستریم نادرست‌اند** (تأییدشده با پروب مستقیم ۱۴۰۴/۰۶/۲۲): با `modelId: gpt-5.6-sol/terra` خودِ freemodels پاسخ می‌دهد «I am Claude Sonnet 5, created by Anthropic» — یعنی پشت برچسب GPT واقعاً مدل Claude سرو می‌شود؛ در حالی که `glm-5.2` و `kimi-k3` هویت درست گزارش می‌کنند. این مشکل سمت freemodels است (ما `modelId` را عیناً می‌فرستیم) و فقط با تعویض آپستریم قابل حل است. پیام خطای 429 آن‌ها هم زیرساخت واقعی را لو می‌دهد: «Nvidia 1 keys + DashScope 3 keys x 64 models».
+5. **ID واقعی مدل‌های GPT در سایت فقط `sol` و `terra` است** (کشف‌شده از باندل رسمی freemodels.pro — تسک ۱۲): ID های قبلی ما (`gpt-5.6-sol/terra`) حدس از روی اسکرین‌شات بود و آپستریم برای ID ناشناس بی‌سروصدا به مدل پیش‌فرض (Claude) fallback می‌کرد — برای همین مدل‌های GPT خودشان را «Claude Sonnet 5» معرفی می‌کردند. اصلاح شد در هر دو نسخه + alias سازگاری (ID های قدیمی و نام نمایشی همچنان پذیرفته می‌شوند). نکتهٔ مستقل: آپستریم رایگان زیرساختش را در خطای 429 لو می‌دهد («Nvidia 1 keys + DashScope 3 keys x 64 models») و هویت مدل‌ها را تضمین نمی‌کند — اگر روزی «GPT واقعی» لازم شد، تعویض آپستریم تنها راه قطعی است.
 
 ### 9.2 Roadmap | مسیر پیشنهادی ادامه
 - **Retry خودکار با backoff** برای 429 آپستریم در لایهٔ پروکسی (در صورت تمایل به تجربهٔ بدون خطا).

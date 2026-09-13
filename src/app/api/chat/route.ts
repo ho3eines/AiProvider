@@ -4,6 +4,7 @@
  */
 import { NextResponse } from 'next/server';
 import { MAX_BODY_BYTES, UPSTREAM_TIMEOUT_MS, openUpstream, logReq, OPEN_CORS } from '@/lib/upstream';
+import { resolveModelId } from '@/lib/models';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,8 +36,20 @@ export async function POST(req: Request) {
       return jsonError(413, 'حجم درخواست بیش از حد مجاز (۵ مگابایت) است.');
     }
 
+    /* نرمال‌سازی نرم modelId (هم‌سو با app.js): ID قدیمی/نام نمایشی → ID واقعی سایت */
+    let bodyOut = body;
+    try {
+      const j = JSON.parse(body) as Record<string, unknown>;
+      if (j && typeof j.modelId === 'string') {
+        j.modelId = resolveModelId(j.modelId);
+        bodyOut = JSON.stringify(j);
+      }
+    } catch {
+      /* بدنه غیر JSON — همان عبور مستقیم */
+    }
+
     /* اتصال به آپستریم با هدرهای جعلی */
-    const { status, headers, res, req: upReq } = await openUpstream(body, UPSTREAM_TIMEOUT_MS);
+    const { status, headers, res, req: upReq } = await openUpstream(bodyOut, UPSTREAM_TIMEOUT_MS);
     logReq('cyan', `POST /api/chat ← آپستریم پاسخ داد: ${status}`);
 
     /* ساخت هدرهای پاسخ — حذف access-control-* ، transfer-encoding ، content-encoding */
