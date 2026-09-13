@@ -1,0 +1,87 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  docker-compose.yml — اجرای محلی/سرور شخصی (VPS) همان چیزی که روی Railway می‌رود
+# ═══════════════════════════════════════════════════════════════════════════
+#  نسخهٔ Next.js (پیش‌فرض):
+#     docker compose up -d --build web
+#     → http://localhost:3000
+#
+#  نسخهٔ تک‌فایل app.js (سبک‌تر):
+#     docker compose --profile single up -d --build single
+#     → http://localhost:3001
+#
+#  کلیدهای پایدار: یک بار `npm run keys:generate` بزنید و خروجی را در
+#  `.env` (کنار همین فایل) بگذارید؛ compose خودش آن را می‌خواند.
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: smart-chat:latest
+    container_name: smart-chat
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      # کلیدهای API (از .env یا shell) — اگر نباشند، هر بار کلید تصادفی ساخته می‌شود
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # در استقرار عمومی روی اینترنت: false (ماسک‌کردن کلیدها در UI)
+      EXPOSE_KEYS: ${EXPOSE_KEYS:-true}
+      # مسیر اختیاری برای نگهداری کلیدها بین ری‌استارت‌ها (وُلوم پایین)
+      API_KEYS_FILE: /data/api-keys.json
+    volumes:
+      - keys-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ── نسخهٔ تک‌فایل (بدون npm install / بدون بیلد) ──
+  single:
+    profiles: ["single"]
+    build:
+      context: .
+      dockerfile: Dockerfile.single
+    image: smart-chat-single:latest
+    container_name: smart-chat-single
+    restart: unless-stopped
+    ports:
+      - "${SINGLE_PORT:-3001}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      EXPOSE_KEYS: ${EXPOSE_KEYS:-true}
+      API_KEYS_FILE: /data/api-keys.json
+    volumes:
+      - keys-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  keys-data:

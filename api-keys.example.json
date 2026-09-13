@@ -1,0 +1,6 @@
+{
+  "_comment": "الگوی فایل کلیدها — کپی کنید به api-keys.json یا بهتر: کلیدها را در متغیرهای محیطی (OPENAI_API_KEY / ANTHROPIC_API_KEY) بگذارید. ساخت خودکار: npm run keys:generate -- --write",
+  "openai": "sk-REPLACE_WITH_48_RANDOM_CHARS",
+  "anthropic": "sk-ant-api03-REPLACE_WITH_88_RANDOM_CHARS",
+  "createdAt": "2026-01-01T00:00:00.000Z"
+}
