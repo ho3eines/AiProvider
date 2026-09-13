@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>چت هوشمند — Project Documentation</title>
+<style>
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Regular.ttf') format('truetype');font-weight:400;font-display:swap;}
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Medium.ttf') format('truetype');font-weight:500;font-display:swap;}
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Bold.ttf') format('truetype');font-weight:700;font-display:swap;}
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Black.ttf') format('truetype');font-weight:900;font-display:swap;}
+@page{size:794px 1123px;margin:0;}
+:root{
+  --c-cover-bg:#0a1628; --c-accent:#4da8da; --c-glow:#2d7ab3;
+  --c-page:#f5f8fc; --c-section:#edf2f9; --c-card:#e4ecf5; --c-stripe:#eef3fa;
+  --c-thead:#1a4a7a; --c-border:#c0d0e2; --c-accent2:#2d7ab3;
+  --c-text:#142840; --c-muted:#5a7a96; --c-cover-text:#e8f0f8; --c-cover-muted:#7a9bb8;
+  --c-code-bg:#142840; --c-code-text:#dbe9f6;
+}
+html,body{margin:0;padding:0;width:794px;background:var(--c-cover-bg);color:var(--c-text);font-family:'Vazirmatn','DejaVu Sans',sans-serif;}
+@media screen{html{height:auto;display:flex;justify-content:center;background:var(--c-cover-bg);}body{margin:20px auto;box-shadow:0 0 60px rgba(0,0,0,.45);}}
+body{line-break:strict;word-break:normal;overflow-wrap:break-word;}
+p,td,li{line-break:strict;}
+p{text-align:justify;margin:0 0 10px;font-size:13.5px;line-height:1.95;}
+/* ---------- Cover ---------- */
+.cover{width:794px;height:1123px;position:relative;background:radial-gradient(circle at 12% 8%,rgba(45,122,179,.15) 0%,rgba(45,122,179,0) 34%),radial-gradient(circle at 88% 94%,rgba(45,122,179,.13) 0%,rgba(45,122,179,0) 38%),var(--c-cover-bg);color:var(--c-cover-text);break-after:page;}
+.cover .frame{position:absolute;top:80px;bottom:80px;left:60px;right:60px;border:2px solid var(--c-accent);}
+.cover .inner{position:absolute;top:80px;bottom:80px;left:60px;right:60px;padding:46px 50px;display:flex;flex-direction:column;box-sizing:border-box;}
+.cv-kicker{font-size:11px;font-weight:500;letter-spacing:5px;color:var(--c-accent);text-transform:uppercase;direction:ltr;text-align:left;}
+.cv-hero{margin-top:120px;font-size:56px;font-weight:900;line-height:1.15;color:var(--c-cover-text);text-shadow:0 0 24px rgba(77,168,218,.25);}
+.cv-hero-en{margin-top:10px;font-size:24px;font-weight:700;letter-spacing:2px;color:var(--c-accent);direction:ltr;text-align:right;}
+.cv-sub{margin-top:26px;font-size:16px;font-weight:500;color:var(--c-cover-text);opacity:.9;line-height:1.7;}
+.cv-summary{margin-top:22px;font-size:13.5px;line-height:1.9;color:var(--c-cover-muted);max-width:540px;text-align:justify;}
+.cv-meta{margin-top:auto;display:flex;gap:10px;flex-wrap:wrap;max-width:100%;}
+.cv-chip{border:1px solid rgba(77,168,218,.45);color:var(--c-cover-text);font-size:11px;padding:6px 14px;border-radius:999px;letter-spacing:.5px;}
+.cv-footer{margin-top:26px;display:flex;justify-content:space-between;font-size:10px;letter-spacing:3px;color:var(--c-cover-muted);text-transform:uppercase;direction:ltr;}
+/* ---------- Body layout ---------- */
+.main-content{background:var(--c-page);padding:56px 58px 46px 58px;}
+.chapter-header{break-after:avoid;break-inside:avoid;margin-top:26px;margin-bottom:14px;}
+.chapter-header:first-child{margin-top:0;}
+.sec-tag{font-size:10px;font-weight:700;letter-spacing:4px;color:var(--c-accent2);text-transform:uppercase;direction:ltr;text-align:right;}
+.sec-title{font-size:21px;font-weight:900;color:var(--c-text);margin-top:4px;line-height:1.35;}
+.divider{width:64px;height:3px;background:var(--c-accent2);border-radius:2px;margin-top:8px;}
+h3{font-size:14.5px;font-weight:700;color:var(--c-text);margin:16px 0 8px;break-after:avoid;}
+ul{margin:4px 0 10px;padding-right:20px;}
+li{font-size:13px;line-height:1.9;margin-bottom:4px;text-align:justify;}
+strong{font-weight:700;}
+.card{background:#ffffff;border:1px solid var(--c-border);border-radius:10px;padding:14px 16px;margin-bottom:12px;break-inside:avoid;}
+.card-title{font-size:13.5px;font-weight:700;color:var(--c-thead);margin-bottom:6px;}
+.note{background:var(--c-card);border-right:3px solid var(--c-accent2);border-radius:8px;padding:10px 14px;font-size:12.5px;line-height:1.85;margin:10px 0;break-inside:avoid;color:var(--c-text);}
+code.ic{direction:ltr;unicode-bidi:embed;font-family:'DejaVu Sans Mono',monospace;font-size:.86em;background:var(--c-card);border:1px solid var(--c-border);border-radius:4px;padding:0 5px;color:var(--c-thead);}
+pre.code{direction:ltr;text-align:left;font-family:'DejaVu Sans Mono',monospace;font-size:10.3px;line-height:1.62;background:var(--c-code-bg);color:var(--c-code-text);border-radius:9px;padding:13px 16px;margin:10px 0;white-space:pre-wrap;overflow-wrap:anywhere;break-inside:avoid;}
+pre.code .c{color:#7a9bb8;}
+table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0;break-inside:avoid;}
+thead{display:table-header-group;}
+tr{break-inside:avoid;}
+th{background:var(--c-thead);color:#ffffff;font-weight:700;padding:8px 10px;text-align:right;font-size:12px;}
+td{border:1px solid var(--c-border);padding:7px 10px;text-align:right;vertical-align:top;line-height:1.7;}
+tbody tr:nth-child(even) td{background:var(--c-stripe);}
+td .ltr{direction:ltr;unicode-bidi:embed;font-family:'DejaVu Sans Mono',monospace;font-size:11px;}
+/* ---------- Architecture diagram ---------- */
+.diagram{background:#ffffff;border:1px solid var(--c-border);border-radius:12px;padding:18px 20px;margin:12px 0;break-inside:avoid;}
+.dg-layer{border:1.5px solid var(--c-accent2);border-radius:9px;background:var(--c-section);padding:10px 14px;text-align:center;}
+.dg-layer .t{font-size:12.5px;font-weight:700;color:var(--c-text);}
+.dg-layer .d{font-size:10.5px;color:var(--c-muted);margin-top:3px;line-height:1.7;}
+.dg-arrow{text-align:center;font-size:15px;color:var(--c-accent2);line-height:1;padding:5px 0;}
+.dg-caption{font-size:10.5px;color:var(--c-muted);text-align:center;margin-top:10px;}
+/* ---------- History & closing ---------- */
+.hist td:first-child{font-weight:700;color:var(--c-thead);text-align:center;}
+.closing{margin-top:22px;background:var(--c-cover-bg);color:var(--c-cover-muted);border-radius:12px;padding:20px 24px;break-inside:avoid;}
+.closing .en{font-size:10px;letter-spacing:3px;color:var(--c-accent);text-transform:uppercase;direction:ltr;text-align:left;}
+.closing .fa{font-size:12.5px;line-height:1.9;margin-top:8px;text-align:justify;}
+.closing .fa b{color:var(--c-cover-text);}
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<div class="cover">
+  <div class="frame"></div>
+  <div class="inner">
+    <div class="cv-kicker">PROJECT DOCUMENTATION · FULL TECHNICAL REFERENCE</div>
+    <div class="cv-hero">چت هوشمند</div>
+    <div class="cv-hero-en">SMART CHAT</div>
+    <div class="cv-sub">اپ چت هوشمند فارسی (RTL) + سرور API سازگار با OpenAI و Anthropic<br>دو نسخهٔ معادل: Next.js 16 و تک‌فایل Node خالص</div>
+    <div class="cv-summary">این سند، مرجع کامل پروژه است: معماری و جریان درخواست، پیش‌نیازهای سیستم، راهنمای نصب و اجرا، قابلیت‌ها، مرجع API با نمونه‌های curl، لیست مدل‌ها، تاریخچهٔ توسعه در هفت تسک، مشکلات شناخته‌شده و نقشهٔ راه پیشنهادی. نسخهٔ Markdown همین محتوا کنار کد (README.md) و سند تحویل سریع در HANDOFF.md نگهداری می‌شود.</div>
+    <div class="cv-meta">
+      <span class="cv-chip">نسخهٔ سند ۱.۰</span>
+      <span class="cv-chip">۱۴ سپتامبر ۲۰۲۶ · ۲۳ شهریور ۱۴۰۵</span>
+      <span class="cv-chip">Next.js 16 · React 19 · Tailwind 4</span>
+      <span class="cv-chip">app.js — بدون وابستگی</span>
+    </div>
+    <div class="cv-footer"><span>SMART CHAT · V1.0</span><span>FREEMODELS-POWERED</span></div>
+  </div>
+</div>
+
+<!-- ================= BODY ================= -->
+<div class="main-content">
+
+  <!-- 1 Overview -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 01</div>
+    <div class="sec-title">معرفی پروژه | Overview</div>
+    <div class="divider"></div>
+  </div>
+  <p>این پروژه یک اپلیکیشن چت هوشمند کامل است که با هدف کار با سرویس رایگان <b>freemodels</b> ساخته شده است. رابط کاربری دقیقاً به سبک ابزارهای مدرن چت AI طراحی شده — تم تاریک، چیدمان راست‌به‌چپ فارسی، فونت Vazirmatn، پیکر مدل گروهی با لوگوی واقعی ارائه‌دهنده‌ها — و پاسخ‌ها به‌صورت زنده (streaming) با نمایش فرایند تفکر مدل (reasoning) رندر می‌شوند. پروژه در قالب <b>دو نسخهٔ موازی</b> تحویل داده شده است که هر دو از یک آپستریم مشترک استفاده می‌کنند و رفتار یکسانی دارند.</p>
+  <div class="card"><div class="card-title">۱) نسخهٔ Next.js — <span class="ltr">src/</span></div>
+  اپ کامل React 19 با Tailwind CSS 4 و کامپوننت‌های client-side؛ مناسب توسعهٔ آینده، پیش‌نمایش زنده و استقرار استاندارد. نقطهٔ ورود UI فایل <code class="ic">src/app/page.tsx</code> و بک‌اند در مسیرهای <code class="ic">src/app/api/*</code> و <code class="ic">src/app/v1/*</code> است.</div>
+  <div class="card"><div class="card-title">۲) نسخهٔ تک‌فایل — <span class="ltr">app.js</span></div>
+  یک فایل CommonJS خالص Node (بدون هیچ وابستگی خارجی) که سرور HTTP، پروکسی، API سازگار OpenAI/Anthropic و کل رابط کاربری را در قالب HTML رشته‌ای داخل همان فایل سرو می‌کند؛ با <code class="ic">node app.js</code> روی هر ماشینی بدون <code class="ic">npm install</code> اجرا می‌شود.</div>
+  <p>هر دو نسخه علاوه بر رابط چت، یک <b>API کامل سازگار با OpenAI و Anthropic</b> نیز ارائه می‌دهند (<code class="ic">/v1/models</code>، <code class="ic">/v1/chat/completions</code>، <code class="ic">/v1/messages</code>) تا از هر کلاینت استانداردی — SDK رسمی، curl، ابزارهای شخص ثالث — بتوان به مدل‌های سرویس دسترسی داشت. احراز هویت با کلیدهای سبک OpenAI و Anthropic انجام می‌شود که به‌صورت خودکار ساخته و در <code class="ic">api-keys.json</code> ذخیره می‌گردند.</p>
+
+  <!-- 2 Requirements -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 02</div>
+    <div class="sec-title">پیش‌نیازهای سیستم | System Requirements</div>
+    <div class="divider"></div>
+  </div>
+  <table>
+    <thead><tr><th style="width:22%">نیازمندی</th><th style="width:40%">نسخهٔ Next.js</th><th>نسخهٔ تک‌فایل (app.js)</th></tr></thead>
+    <tbody>
+      <tr><td><b>Runtime</b></td><td>Node.js ≥ 20 (توصیه: ۲۴) یا Bun ≥ 1.3</td><td>Node.js ≥ 18 (فقط ماژول‌های داخلی <span class="ltr">http/https/fs/crypto</span>)</td></tr>
+      <tr><td><b>Package Manager</b></td><td>bun (توسعه و تست با bun 1.3.14) یا npm</td><td><b>هیچ</b> — بدون نصب پکیج اجرا می‌شود</td></tr>
+      <tr><td><b>فضای دیسک</b></td><td>حدود ۶۰۰MB (node_modules)</td><td>حدود ۱۲۰KB (app.js + api-keys.json)</td></tr>
+      <tr><td><b>شبکه</b></td><td>آپستریم freemodels + fonts.googleapis.com</td><td>فقط آپستریم (لوگوها base64 داخل فایل‌اند)</td></tr>
+      <tr><td><b>سیستم‌عامل</b></td><td colspan="2">هر سیستم‌عامل دارای Node — Linux / macOS / Windows</td></tr>
+      <tr><td><b>پورت</b></td><td>3000 (قابل تغییر با <span class="ltr">-p</span>)</td><td>3000 پیش‌فرض · تغییر با <span class="ltr">PORT=xxxx</span></td></tr>
+    </tbody>
+  </table>
+  <div class="note">نسخهٔ تک‌فایل عمداً به‌جای <code class="ic">fetch</code> از <code class="ic">node:https</code> استفاده می‌کند تا بتواند هدرهای <code class="ic">Origin</code> و <code class="ic">Referer</code> (که در fetch استاندارد ممنوع‌اند) را واقعاً ارسال کند؛ بنابراین روی هر Node ≥ 18 بدون هیچ پیش‌نیاز دیگری کار می‌کند.</div>
+
+  <!-- 3 Installation -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 03</div>
+    <div class="sec-title">نصب و اجرا | Installation &amp; Run</div>
+    <div class="divider"></div>
+  </div>
+  <h3>۳.۱ — نسخهٔ Next.js</h3>
+  <pre class="code"># نصب وابستگی‌ها (bun) — یا معادل npm/pnpm
+bun install
+
+# اجرای محیط توسعه روی پورت 3000 (لاگ در dev.log)
+bun run dev            # → http://localhost:3000
+
+# بیلد پروداکشن (standalone) و اجرا
+bun run build
+bun run start          # bun .next/standalone/server.js</pre>
+  <h3>۳.۲ — نسخهٔ تک‌فایل (app.js)</h3>
+  <pre class="code">node app.js            # پورت 3000
+PORT=8080 node app.js  # پورت دلخواه
+node --check app.js    # بررسی صحت سینتکس (قبل از هر استقرار)</pre>
+  <h3>۳.۳ — متغیرهای محیطی | Environment Variables</h3>
+  <table>
+    <thead><tr><th style="width:30%">متغیر</th><th style="width:28%">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ltr">PORT</span></td><td><span class="ltr">3000</span></td><td>پورت سرور (فقط نسخهٔ app.js)</td></tr>
+      <tr><td><span class="ltr">OPENAI_API_KEY</span></td><td>مقدار <span class="ltr">api-keys.json</span></td><td>override کلید سبک OpenAI</td></tr>
+      <tr><td><span class="ltr">ANTHROPIC_API_KEY</span></td><td>مقدار <span class="ltr">api-keys.json</span></td><td>override کلید سبک Anthropic</td></tr>
+    </tbody>
+  </table>
+  <h3>۳.۴ — رفتار اولین اجرا | First-Run Behavior</h3>
+  <p>در اولین اجرا (هر دو نسخه) اگر <code class="ic">api-keys.json</code> وجود نداشته باشد، دو کلید جدید ساخته و کنار پروژه ذخیره می‌شود (permission <code class="ic">600</code>). اگر فایل موجود باشد همان کلیدها لود می‌شوند و <b>هر دو نسخه دقیقاً همان کلیدها را می‌پذیرند</b>. نسخهٔ Next.js همین فایل را از طریق <code class="ic">src/lib/apikeys.ts</code> (با کش در حافظه) می‌خواند، پس کلیدها بین دو نسخه یکسان می‌مانند.</p>
+
+  <!-- 4 Architecture -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 04</div>
+    <div class="sec-title">معماری | Architecture</div>
+    <div class="divider"></div>
+  </div>
+  <div class="diagram">
+    <div class="dg-layer"><div class="t">مرورگر — UI چت (page.tsx / HTML داخلی app.js)</div>
+      <div class="d">RTL فارسی · تم تاریک <span class="ltr">#0b1220</span> · پیکر مدل گروهی · تفکر · جست‌وجوی عمیق · استریم · Raw SSE · سایدبار</div></div>
+    <div class="dg-arrow">▼ &nbsp; POST /api/chat &nbsp;·&nbsp; GET /api/ping &nbsp;·&nbsp; GET /api/keys &nbsp;▼</div>
+    <div class="dg-layer"><div class="t">سرور — Next.js route handlers | app.js handlers</div>
+      <div class="d">سقف بدنه 5MB (413) · جعل هدرهای مرورگر · node:https · timeout 180s · pipe مستقیم استریم · خطا 502/504<br>به‌علاوه سه اندپوینت /v1/* که پاسخ آپستریم را به فرمت استاندارد OpenAI یا Anthropic بازتولید می‌کنند</div></div>
+    <div class="dg-arrow">▼ &nbsp; POST https://freemodels-chat.freemodels.workers.dev/ (Origin: freemodels.pro) ▼</div>
+    <div class="dg-layer"><div class="t">آپستریم — freemodels</div>
+      <div class="d">۷ مدل · پاسخ SSE سبک OpenAI (<span class="ltr">delta.content</span> + <span class="ltr">delta.reasoning_content</span>)</div></div>
+    <div class="dg-caption">شکل ۱ — جریان درخواست از مرورگر تا آپستریم؛ اندپوینت‌های /v1 پاسخ را نرمال‌سازی می‌کنند، نه صرفاً عبور خام.</div>
+  </div>
+  <h3>۴.۲ — اتصال آپستریم | Upstream Connection</h3>
+  <ul>
+    <li><b>URL آپستریم:</b> <code class="ic">https://freemodels-chat.freemodels.workers.dev/</code> — ثابت در <code class="ic">src/lib/upstream.ts</code> و معادلش در app.js.</li>
+    <li><b>جعل هدرهای مرورگر:</b> <code class="ic">Origin: https://freemodels.pro</code>، <code class="ic">Referer: https://freemodels.pro/</code>، UA کروم ویندوزی، کامل <code class="ic">sec-ch-*</code> و <code class="ic">sec-fetch-*</code>، و <code class="ic">Accept-Encoding: identity</code> تا پاسخ فشرده نباشد و pipe مستقیم بدون decompress ممکن شود.</li>
+    <li><b>چرا node:https؟</b> مرورگرها و fetch ارسال دستی Origin/Referer را ممنوع می‌کنند؛ برای عبور از CORS آپستریم باید این هدرها واقعاً روی سیم برود. این تصمیم در Task 1 گرفته شد و در هر دو نسخه رعایت شده است.</li>
+    <li><b>پایداری استریم:</b> پاسخ تکه‌به‌تکه (بدون تجمیع بافر) رد می‌شود؛ <code class="ic">Cache-Control: no-cache, no-transform</code> و <code class="ic">X-Accel-Buffering: no</code> ست می‌شود تا پروکسی‌های میانی بافر نکنند. قطع کلاینت ← destroy فوری آپستریم.</li>
+  </ul>
+  <h3>۴.۳ — نقشهٔ فایل‌ها | File Map</h3>
+  <table>
+    <thead><tr><th style="width:36%">فایل</th><th>نقش</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ltr">src/app/page.tsx</span></td><td>کل UI چت (client component ~۹۰۰ خط): سایدبار، هدر، پیکر مدل گروهی، کامپوزر، پیام‌ها، مودال تنظیمات، Raw SSE</td></tr>
+      <tr><td><span class="ltr">src/app/layout.tsx</span></td><td><span class="ltr">lang=fa · dir=rtl</span> · فونت Vazirmatn (لینک مستقیم Google Fonts) · متادیتا</td></tr>
+      <tr><td><span class="ltr">src/app/globals.css</span></td><td>اسکرول‌بار سفارشی، کرسر چشمک‌زن استریم، توکن‌های هایلایت کد، باکس تفکر، استایل‌های md-*</td></tr>
+      <tr><td><span class="ltr">src/app/error.tsx</span></td><td>مرز خطای فارسی برای جلوگیری از کرش کل صفحه</td></tr>
+      <tr><td><span class="ltr">src/lib/upstream.ts</span></td><td>ثابت‌های آپستریم + هدرهای جعلی + <span class="ltr">openUpstream</span> (node:https، timeout 180s) + لاگ رنگی + CORS باز</td></tr>
+      <tr><td><span class="ltr">src/lib/sse.ts</span></td><td>پارسر جهانی SSE آپستریم: سبک OpenAI delta، فیلدهای مستقیم، reasoning_content/reasoning/thinking، [DONE]، خطای داخل استریم، تجمیع JSON ناقص</td></tr>
+      <tr><td><span class="ltr">src/lib/markdown.ts</span></td><td>رندر مارک‌داون امن بدون کتابخانه: escape کامل، بلوک کد + هایلایت + دکمهٔ کپی، کرسر چشمک‌زن</td></tr>
+      <tr><td><span class="ltr">src/lib/models.ts</span></td><td><span class="ltr">FM_MODELS</span> (۷ مدل + گروه) + <span class="ltr">resolveModelId</span> — منبع واحد UI و اندپوینت‌های /v1</td></tr>
+      <tr><td><span class="ltr">src/lib/apikeys.ts</span></td><td>ساخت/لود <span class="ltr">api-keys.json</span> (mode 600) با override env · اعتبارسنجی · <span class="ltr">bearerFrom</span></td></tr>
+      <tr><td><span class="ltr">src/lib/v1.ts</span></td><td><span class="ltr">V1_CORS · SSE_HEADERS · flattenContent · readAll</span> (سقف 8MB) · <span class="ltr">estTokens</span></td></tr>
+      <tr><td><span class="ltr">src/app/api/*</span></td><td>chat (پروکسی استریم داخلی) · ping (تست اتصال) · keys (کلیدها برای مودال)</td></tr>
+      <tr><td><span class="ltr">src/app/v1/*</span></td><td>models · chat/completions (OpenAI) · messages (Anthropic)</td></tr>
+      <tr><td><span class="ltr">app.js</span></td><td>نسخهٔ تک‌فایل (3082 خط): <span class="ltr">PAGE_CSS/PAGE_JS/PAGE_HTML</span> + هندلرهای همان ۶ مسیر + بنر رنگی — بدون هیچ پکیج</td></tr>
+      <tr><td><span class="ltr">api-keys.json</span></td><td>کلیدهای مشترک هر دو نسخه (permission 600)</td></tr>
+      <tr><td><span class="ltr">public/</span></td><td>۴ لوگوی واقعی ارائه‌دهنده — در app.js به‌صورت base64 داخل <span class="ltr">EMBEDDED_LOGOS</span> هم embed شده‌اند</td></tr>
+      <tr><td><span class="ltr">scripts/embed_logos.py</span></td><td>ابزار بازتولید بلوک EMBEDDED_LOGOS (بهینه‌سازی 96px + base64)</td></tr>
+      <tr><td><span class="ltr">worklog.md</span></td><td>گزارش کارِ تسک‌به‌تسک (منبع بخش ۸)</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 5 Features -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 05</div>
+    <div class="sec-title">قابلیت‌ها | Features</div>
+    <div class="divider"></div>
+  </div>
+  <h3>۵.۱ — رابط چت | Chat UI</h3>
+  <ul>
+    <li><b>چیدمان:</b> سایدبار راست 260px (چت جدید، لیست گفتگوها با حذف، خروجی Markdown/JSON، پاک‌کردن همه با confirm) + drawer موبایل؛ هدر کنترل‌ها؛ کامپوزر چسبان.</li>
+    <li><b>پیکر مدل گروهی</b> (مطابق HTML واقعی سایت freemodels): سه گروه «Claude Pro / ChatGPT Pro / Other Pro Models» با آیکن‌های lucide، لوگوی 20px گردگوشه، ردیف انتخاب‌شدهٔ تیره <span class="ltr">#0A0A0B</span> با تیک، hover <span class="ltr">#FFFBF5</span>، اسکرول داخلی، تارگت لمسی 44px، بستن با کلیک بیرون و Esc.</li>
+    <li><b>کنترل‌های هدر:</b> تفکر · جست‌وجوی عمیق · استریم · دکمهٔ «اتصال؟» با ping خودکار · پنل Raw SSE (80KB) · مودال ⚙️ با System Prompt و بخش «🔑 اندپوینت‌های API و کلیدها» (کلیدها + کپی + نمونه curl) · نشانگر وضعیت سبز/زرد/قرمز.</li>
+    <li><b>پیام‌ها:</b> اکشن‌های hover (کپی/ویرایش اینلاین کاربر با حذف پیام‌های بعدی/حذف/بازتولید ↻)، باکس جمع‌شوندهٔ «💭 فرایند تفکر مدل»، آمار ⏱/🧩/✍️، نشان «⏹ متوقف شد»، حباب قرمز خطا.</li>
+    <li><b>استریم زنده:</b> flush با <span class="ltr">requestAnimationFrame</span>، کرسر چشمک‌زن، دکمهٔ ارسال ↔ توقف (⏹ + Esc با AbortController) و destroy واقعی آپستریم.</li>
+    <li><b>حافظه:</b> <span class="ltr">localStorage</span> با کلیدهای <span class="ltr">fm_chats</span> / <span class="ltr">fm_settings</span>؛ بارگذاری بعد از mount (بدون hydration mismatch)؛ صفحهٔ خوش‌آمد با ۴ پیشنهاد.</li>
+  </ul>
+  <h3>۵.۲ — مارک‌داون و کد | Markdown &amp; Code</h3>
+  <p>رندرر مارک‌داون <b>دست‌ساز و امن</b> است: ابتدا escape کامل HTML و سپس درج کنترل‌شدهٔ تگ‌ها. بلوک‌های کد با placeholder جداسازی می‌شوند و هدر زبان + دکمهٔ «کپی» + هایلایت سینتکس ساده (کلیدواژه/رشته/عدد/کامنت) + <span class="ltr">dir=ltr</span> دارند؛ کد اینلاین، بولد/ایتالیک/خط‌خورده/لینک (target=_blank)، هدینگ‌ها، لیست‌ها، نقل‌قول و خط افقی هم پشتیبانی می‌شوند. این منطق در <code class="ic">src/lib/markdown.ts</code> و معادلش در <span class="ltr">PAGE_JS</span> یکسان است.</p>
+  <h3>۵.۳ — سرور API | API Server</h3>
+  <p>هر دو نسخه سه اندپوینت استاندارد + دو مسیر داخلی را سرو می‌کنند (جزئیات بخش ۷) و خطاها را دقیقاً در فرمت JSON همان API مقصد برمی‌گردانند — <span class="ltr">error.message/type/code</span> برای OpenAI و <span class="ltr">error.type/message</span> برای Anthropic. همهٔ مسیرها CORS باز شامل هدرهای احراز هویت دارند.</p>
+
+  <!-- 6 Models -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 06</div>
+    <div class="sec-title">مدل‌ها | Models</div>
+    <div class="divider"></div>
+  </div>
+  <p>منبع واحد لیست مدل‌ها <code class="ic">src/lib/models.ts</code> (Next) و ثابت <span class="ltr">FM_MODELS</span> (app.js) است؛ هم پیکر UI و هم اندپوینت‌های <span class="ltr">/v1</span> از همین می‌خوانند و همیشه همگام‌اند. مدل پیش‌فرض: <b><span class="ltr">claude-fable-5.1</span></b>.</p>
+  <table>
+    <thead><tr><th style="width:30%">Model ID</th><th style="width:30%">Display Name</th><th style="width:20%">Vendor</th><th>Group</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ltr">claude-sonnet-5</span></td><td>Claude Sonnet 5</td><td>Anthropic</td><td>Claude Pro</td></tr>
+      <tr><td><span class="ltr">claude-fable-5</span></td><td>Claude Fable 5</td><td>Anthropic</td><td>Claude Pro</td></tr>
+      <tr><td><span class="ltr">claude-fable-5.1</span></td><td>Claude Fable 5.1 ⭐ پیش‌فرض</td><td>Anthropic</td><td>Claude Pro</td></tr>
+      <tr><td><span class="ltr">gpt-5.6-sol</span></td><td>GPT 5.6 Sol</td><td>OpenAI</td><td>ChatGPT Pro</td></tr>
+      <tr><td><span class="ltr">gpt-5.6-terra</span></td><td>GPT 5.6 Terra</td><td>OpenAI</td><td>ChatGPT Pro</td></tr>
+      <tr><td><span class="ltr">glm-5.2</span></td><td>GLM 5.2</td><td>Z.AI</td><td>Other Pro Models</td></tr>
+      <tr><td><span class="ltr">kimi-k3</span></td><td>Kimi K3</td><td>Moonshot AI</td><td>Other Pro Models</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><b>تطبیق نرم نام مدل</b> (<span class="ltr">resolveModelId</span>): ورودی trim و lowercase و تبدیل فاصله/آندرلاین به خط تیره می‌شود و نام نمایشی هم پذیرفته است — «Claude Fable 5.1»، «claude_fable 5.1» و «claude-fable-5.1» هر سه به یک id نرمال می‌شوند. ورودی ناشناخته دست‌نخورده عبور می‌کند و ورودی خالی ← مدل پیش‌فرض.</div>
+
+  <!-- 7 API Reference -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 07</div>
+    <div class="sec-title">مرجع API | API Reference</div>
+    <div class="divider"></div>
+  </div>
+  <h3>۷.۱ — احراز هویت | Authentication</h3>
+  <table>
+    <thead><tr><th style="width:45%">اندپوینت</th><th>هدر</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ltr">/v1/models · /v1/chat/completions</span></td><td><span class="ltr">Authorization: Bearer &lt;key&gt;</span></td></tr>
+      <tr><td><span class="ltr">/v1/messages</span></td><td><span class="ltr">x-api-key: &lt;key&gt;</span> (یا همان Bearer) + <span class="ltr">anthropic-version</span> اختیاری</td></tr>
+      <tr><td><span class="ltr">/api/chat · /api/ping</span></td><td>بدون احراز هویت (اپ داخلی)</td></tr>
+    </tbody>
+  </table>
+  <p><b>هر دو کلید روی هر دو اندپوینت پذیرفته می‌شوند.</b> کلیدهای فعلی (از <code class="ic">api-keys.json</code>):</p>
+  <pre class="code">{
+  "openai":    "sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50",
+  "anthropic": "sk-ant-api03-9lamB2K7KoYT8fw8tAp2CKL5kKsOHKhN4mE9eawuzRuW0aU3umJirsEFbS3B6RCjLRw8lrJ0YRmsnxECIu3nHaKM"
+}</pre>
+  <h3>۷.۲ — <span class="ltr">GET /api/ping</span> — تست اتصال</h3>
+  <p>درخواست سبک <span class="ltr">stream:false</span> با پیام ping به آپستریم می‌فرستد (تایم‌اوت ۲۰ ثانیه) و برمی‌گرداند:</p>
+  <pre class="code">{ "status": "ok", "ms": 2635, "sample": "...اولین 200 کاراکتر پاسخ یا خطای آپستریم..." }</pre>
+  <h3>۷.۳ — <span class="ltr">POST /api/chat</span> — پروکسی داخلی</h3>
+  <pre class="code">POST /api/chat
+{ "messages":[{"role":"user","content":"سلام"}],
+  "modelId":"claude-fable-5.1", "thinking":false, "deepSearch":false, "stream":true }
+→ عبور مستقیم استریم SSE آپستریم (سبک OpenAI با delta.reasoning_content / delta.content)
+→ خطاها: 413 (بدنه > 5MB) · 502 (خطای اتصال) · 504 (timeout 180s) · عبور کد آپستریم (مثلاً 429)</pre>
+  <h3>۷.۴ — <span class="ltr">GET /v1/models</span> — لیست مدل‌ها</h3>
+  <pre class="code">curl -s http://localhost:3000/v1/models \
+  -H "Authorization: Bearer sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50"
+
+{ "object":"list", "data":[
+  { "id":"claude-sonnet-5",  "object":"model", "created":1789321278, "owned_by":"freemodels-anthropic" },
+  { "id":"claude-fable-5",   "object":"model", "created":1789321278, "owned_by":"freemodels-anthropic" },
+  { "id":"claude-fable-5.1", "object":"model", "created":1789321278, "owned_by":"freemodels-anthropic" },
+  { "id":"gpt-5.6-sol",      "object":"model", "created":1789321278, "owned_by":"freemodels-openai" },
+  { "id":"gpt-5.6-terra",    "object":"model", "created":1789321278, "owned_by":"freemodels-openai" },
+  { "id":"glm-5.2",          "object":"model", "created":1789321278, "owned_by":"freemodels-z.ai" },
+  { "id":"kimi-k3",          "object":"model", "created":1789321278, "owned_by":"freemodels-moonshot-ai" } ] }</pre>
+  <div class="note">فیلدهای <span class="ltr">group</span>/لوگو عمداً در پاسخ نیستند تا فرمت استاندارد OpenAI حفظ شود؛ آن‌ها فقط برای UI هستند. بدون کلید ← <span class="ltr">401 invalid_api_key</span>.</div>
+  <h3>۷.۵ — <span class="ltr">POST /v1/chat/completions</span> — سازگار OpenAI</h3>
+  <ul>
+    <li><b>فیلدها:</b> <span class="ltr">model</span> (نرمال نرم؛ خالی ← پیش‌فرض)، <span class="ltr">messages</span> (اجباری)، <span class="ltr">stream</span>، <span class="ltr">stream_options.include_usage</span> + دو اکستنشن غیراستاندارد: <span class="ltr">thinking</span> و <span class="ltr">deep_search</span>.</li>
+    <li><b>غیراستریم:</b> آبجکت کامل <span class="ltr">chat.completion</span> با <span class="ltr">choices[].message.content</span> و <span class="ltr">usage</span> تخمینی (~۴ نویسه = ۱ توکن).</li>
+    <li><b>استریم:</b> چانک نقش ← دلتاها (<span class="ltr">content</span> و در صورت وجود <span class="ltr">reasoning_content</span>) ← چانک <span class="ltr">finish_reason:"stop"</span> ← چانک usage (در صورت include_usage) ← <span class="ltr">data: [DONE]</span>.</li>
+  </ul>
+  <pre class="code">curl -N http://localhost:3000/v1/chat/completions \
+  -H "Authorization: Bearer sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-fable-5.1","messages":[{"role":"user","content":"سلام"}],"stream":true}'</pre>
+  <h3>۷.۶ — <span class="ltr">POST /v1/messages</span> — سازگار Anthropic</h3>
+  <ul>
+    <li>طبق قوانین Anthropic فیلدهای <span class="ltr">model</span> و <span class="ltr">max_tokens</span> <b>اجباری‌اند</b> (نبود ← 400 با پیام <span class="ltr">"model: Field required"</span> / <span class="ltr">"max_tokens: Field required"</span>).</li>
+    <li><span class="ltr">system</span> به‌صورت رشته یا آرایهٔ بلوک پذیرفته می‌شود و به یک پیام system تبدیل می‌گردد.</li>
+    <li><b>غیراستریم:</b> آبجکت <span class="ltr">message</span> با بلوک‌های <span class="ltr">{type:"thinking"}</span> (در صورت وجود) و <span class="ltr">{type:"text"}</span> + <span class="ltr">stop_reason:"end_turn"</span> + usage.</li>
+    <li><b>استریم:</b> چرخهٔ کامل <span class="ltr">message_start → ping → (content_block_start + content_block_delta با thinking_delta/text_delta + content_block_stop)* → message_delta → message_stop</span>.</li>
+  </ul>
+  <pre class="code">curl -N http://localhost:3000/v1/messages \
+  -H "x-api-key: sk-ant-api03-9lamB2K7KoYT8fw8tAp2CKL5kKsOHKhN4mE9eawuzRuW0aU3umJirsEFbS3B6RCjLRw8lrJ0YRmsnxECIu3nHaKM" \
+  -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
+  -d '{"model":"claude-fable-5.1","max_tokens":1024,"messages":[{"role":"user","content":"سلام"}],"stream":true}'</pre>
+  <h3>۷.۷ — فرمت خطاها | Error Formats</h3>
+  <table>
+    <thead><tr><th style="width:26%">سبک</th><th>ساختار</th></tr></thead>
+    <tbody>
+      <tr><td>OpenAI-style</td><td><span class="ltr">{"error":{"message","type":"invalid_request_error|api_error","param":null,"code":"invalid_api_key"}}</span></td></tr>
+      <tr><td>Anthropic-style</td><td><span class="ltr">{"type":"error","error":{"type":"authentication_error|invalid_request_error|rate_limit_error|api_error","message"}}</span></td></tr>
+      <tr><td>نگاشت کدها</td><td>خطای اتصال ← <b>502</b> · تایم‌اوت ← <b>504</b> · 429 آپستریم ← همان 429 (<span class="ltr">rate_limit_error</span> در سبک Anthropic)</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 8 History -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 08</div>
+    <div class="sec-title">تاریخچهٔ توسعه | Development History</div>
+    <div class="divider"></div>
+  </div>
+  <p>پروژه در هفت تسکِ متوالی ساخته و تأیید شده است؛ گزارش کامل هر تسک با جزئیات تست در <code class="ic">worklog.md</code> موجود است و چک‌لیست صحت‌سنجی برای تغییرات آینده در <code class="ic">HANDOFF.md</code> آمده است.</p>
+  <table class="hist">
+    <thead><tr><th style="width:8%">#</th><th style="width:52%">تسک</th><th>نکتهٔ ماندگار</th></tr></thead>
+    <tbody>
+      <tr><td>۱</td><td>بک‌اند پروکسی /api/chat + /api/ping + کتابخانه‌های مشترک (upstream/sse/markdown)</td><td>تصمیم node:https به‌جای fetch برای هدرهای جعلی</td></tr>
+      <tr><td>۲</td><td>فرانت‌اند کامل RTL فارسی (page.tsx + layout + globals.css + error.tsx)</td><td>بدون hydration mismatch؛ حافظهٔ localStorage</td></tr>
+      <tr><td>۳</td><td>تأیید end-to-end با مرورگر headless</td><td>استریم ۲۸۶ تکه/۱۹ ثانیه؛ توقف/بازتولید/ویرایش/خروجی/موبایل ✓</td></tr>
+      <tr><td>۴</td><td>نسخهٔ تک‌فایل app.js (پورت کامل منطق، بدون پکیج)</td><td>۲۰۵۸ خط؛ رعایت قیود PAGE_JS</td></tr>
+      <tr><td>۵</td><td>تأیید مستقل app.js + جمع‌بندی</td><td>تست ۶ مسیر + 413 بدنهٔ بزرگ + eslint ignore</td></tr>
+      <tr><td>۶</td><td>۷ مدل جدید + کلیدهای API + سه اندپوینت /v1 در هر دو نسخه</td><td>منبع واحد FM_MODELS؛ مودال 🔑 اندپوینت‌ها و کلیدها</td></tr>
+      <tr><td>۷</td><td>بازیابی workspace از tar + پیکر مدل گروهی مطابق سایت freemodels</td><td>۴ لوگوی واقعی؛ رفع باگ z-index stacking؛ embed base64</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 9 Known Issues & Roadmap -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 09</div>
+    <div class="sec-title">مشکلات شناخته‌شده و نقشهٔ راه | Known Issues &amp; Roadmap</div>
+    <div class="divider"></div>
+  </div>
+  <h3>۹.۱ — مشکلات شناخته‌شده | Known Issues</h3>
+  <ul>
+    <li><b>خطای موقت 429 آپستریم</b> («providers exhausted» / «Service temporarily overloaded»): رفتار سرویس رایگان است، نه باگ پروژه. هر دو نسخه آن را شفاف به حباب قرمز (UI) یا کد/فرمت استاندارد (API) تبدیل می‌کنند و retry پس از چند ثانیه معمولاً موفق است.</li>
+    <li><b>فرمت پاسخ آپستریم قفل به سبک OpenAI فعلی است:</b> پارسر <span class="ltr">sse.ts</span> جهانی طراحی شده، اما اگر آپستریم ساختارش را تغییر دهد اولین نقطهٔ بررسی همین فایل (و معادل <span class="ltr">makeUpstreamParser</span> در app.js) است.</li>
+    <li><b>وابستگی فونت به شبکه در نسخهٔ Next:</b> فونت Vazirmatn با لینک مستقیم Google Fonts لود می‌شود (تصمیم عمدی برای مقاومت به قطعی نصب)؛ در محیط بدون اینترنت UI با فونت جایگزین رندر می‌شود. نسخهٔ app.js این مشکل را ندارد.</li>
+    <li><b>usage تخمینی است</b> (~۴ نویسه = ۱ توکن) چون آپستریم usage واقعی نمی‌دهد.</li>
+  </ul>
+  <h3>۹.۲ — مسیر پیشنهادی ادامه | Roadmap</h3>
+  <ul>
+    <li><b>Retry خودکار با backoff</b> برای 429 آپستریم در لایهٔ پروکسی — بهترین بهبود تجربهٔ کاربر.</li>
+    <li><b>افزودن فیلدهای group/vendor به /v1/models</b> به‌صورت extension اختیاری (سازگاری OpenAI حفظ می‌شود).</li>
+    <li><b>استقرار پروداکشن:</b> <span class="ltr">bun run build</span> + اجرای standalone پشت reverse proxy (با <span class="ltr">X-Accel-Buffering: no</span>) یا <span class="ltr">node app.js</span> با systemd/pm2.</li>
+    <li><b>تست‌های خودکار:</b> اسکریپت smoke برای ۶ مسیر (فعلاً چک‌لیست دستی در HANDOFF.md § 5).</li>
+    <li><b>چندکاربره‌سازی (اختیاری):</b> محدودسازی نرخ و احراز هویت جدا برای /api/chat در صورت عمومی‌شدن اپ.</li>
+  </ul>
+
+  <div class="closing">
+    <div class="en">SMART CHAT — PROJECT DOCUMENTATION · V1.0 · SEPTEMBER 2026</div>
+    <div class="fa">این سند همراه با <b>README.md</b> (منبع Markdown همین محتوا) و <b>HANDOFF.md</b> (سند تحویل سریع برای توسعه‌دهنده/ایجنت بعدی) نگهداری می‌شود؛ پس از هر تغییر مهم در پروژه، هر سه فایل را همگام به‌روزرسانی کنید. گزارش خام تسک‌ها و جزئیات تست‌ها در <b>worklog.md</b> در دسترس است.</div>
+  </div>
+
+</div>
+</body>
+</html>

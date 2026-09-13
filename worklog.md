@@ -155,3 +155,25 @@ Stage Summary:
 - هر دو نسخه حالا پیکر مدل گروهی دقیقاً مثل سایت freemodels دارند: Claude Pro (Sonnet 5، Fable 5، Fable 5.1) / ChatGPT Pro (Sol، Terra) / Other Pro Models (GLM 5.2، Kimi K3) با لوگو، سازنده، ردیف انتخاب‌شدهٔ تیره با تیک و اسکرول داخلی
 - فایل‌های تغییریافته: src/app/page.tsx، app.js، public/{4 لوگو}، scripts/embed_logos.py (ابزار embed)؛ api-keys.json و بقیهٔ منطق دست‌نخورده
 - known-issue ثابت: آپستریم رایگان گاهی «Service temporarily overloaded/429» می‌دهد — رفتار سرویس، نه باگ UI
+
+---
+Task ID: 8
+Agent: main (Z.ai Code)
+Task: ساخت فایل handoff و داکیومنت کامل پروژه (MD + PDF، دوزبانه، فوق‌دقیق) طبق پاسخ‌های کاربر از AskUserQuestion
+
+Work Log:
+- خواندن کامل زنجیرهٔ ابزار pdf: SKILL.md → fonts.md → creative-flow.md → overflow/pagination/palette/typography/cover (کامل) → charts.md → cover-backgrounds.md؛ مسیر انتخابی: Creative Flow (HTML dir=rtl + html2pdf-next.js) چون سند فارسی RTL است
+- بررسی منابع پروژه برای دقت محتوا: package.json، upstream.ts، apikeys.ts، v1.ts، api/chat، api/ping، api/keys، v1/models، v1/chat/completions، v1/messages، api-keys.json، نقشهٔ کامل توابع app.js (grep)
+- دانلود ۴ وزن فونت Vazirmatn (jsDelivr) به download/docs/assets/fonts/ — هیچ فونت عربی/فارسی محلی نصب نبود
+- نوشتن README.md (ریشه + کپی در download): ۹ بخش — معرفی، پیش‌نیاز سیستم، نصب و اجرا (Next + app.js + env + اولین اجرا)، معماری (دیاگرام + آپستریم + نقشهٔ ۱۷ فایل)، قابلیت‌ها، جدول ۷ مدل، مرجع API (احراز هویت + ۶ اندپوینت + curl با کلیدهای واقعی + فرمت خطا)، تاریخچهٔ ۷ تسک، known issues + roadmap
+- نوشتن HANDOFF.md (ریشه + کپی در download): TL;DR سه‌دستوری، نقشهٔ مسیرها، ۱۰ نکتهٔ بحرانی، قرارداد فرانت-بک، چک‌لیست صحت‌سنجی (سرور/مرورگر)، تاریخچه، next steps
+- ساخت دو HTML دوزبانه RTL (قالب Crystal Blue — کاور تیره #0a1628 + بدنه روشن #f5f8fc، هم‌خانوادهٔ آبی ~215°): SmartChat-README.html (۹ سکشن + دیاگرام معماری CSS + ۷ جدول) و SmartChat-HANDOFF.html (۷ سکشن + کارت‌های شماره‌دار gotcha + چک‌لیست)
+- رفع یافته‌های اعتبارسنج: حذف glowهای offset منفی از کاور (ادغام در background خود cover با radial-gradient) → حذف OVERFLOW_DECORATION؛ escape ‎</script>‎ و <vendor> و ‎<=‎ در HTML
+- poster_validate: خطاهای COVER_TEXT_OVERLAP همگی مختصات y>1123 (زیرخط divider سکشن‌ها در بدنه — طراحی عمدی قالب Flow) بودند؛ کاور (y≤1123) پاک — طبق SKILL.md این ابزار فقط برای cover Report/Academic است؛ تبدیل با fallback رسمی ‎--nopaged (pagedjs نصب نبود؛ pagination بومی Chromium برای RTL مطمئن‌تر)
+- پس‌پردازش (scripts/postprocess_pdfs.py): شمارهٔ صفحه با pymupdf (جلد بدون شماره، بدنه از ۱، فقط عدد)، متادیتا (Title دوزبانه/Author Z.ai/Subject)، اسکن U+FFFD = 0، صفحهٔ نزدیک‌به‌خالی = هیچ
+- pdf_qa هر دو: بدون سرریز، fill کافی، full-bleed کاور، حاشیه متقارن؛ فقط WARN خط-آغاز نشانه‌ها = artifact استخراج bidi متن RTL (غیرمسدودکننده)؛ بازبینی بصری PNG صفحات نمونه: شکل‌دهی فارسی/جدول‌ها/بلوک‌های کد LTR/کارت‌های شماره‌دار همه سالم
+
+Stage Summary:
+- تحویل‌دادنی‌ها: README.md و HANDOFF.md در ریشه پروژه + کپی در download/ · download/docs/{SmartChat-README.pdf (10 صفحه، 237KB)، SmartChat-HANDOFF.pdf (5 صفحه، 161KB)، هر دو HTML منبع، assets/fonts/4 وزن Vazirmatn}
+- کلیدهای واقعی طبق خواستهٔ کاربر داخل هر دو سند درج شد (openai + anthropic از api-keys.json)
+- known-issue ثابت: آپستریم رایگان گاهی 429 — در سند‌ها به‌عنوان رفتار سرویس مستند شد

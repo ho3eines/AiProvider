@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>چت هوشمند — Project Handoff</title>
+<style>
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Regular.ttf') format('truetype');font-weight:400;font-display:swap;}
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Medium.ttf') format('truetype');font-weight:500;font-display:swap;}
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Bold.ttf') format('truetype');font-weight:700;font-display:swap;}
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Black.ttf') format('truetype');font-weight:900;font-display:swap;}
+@page{size:794px 1123px;margin:0;}
+:root{
+  --c-cover-bg:#0a1628; --c-accent:#4da8da; --c-glow:#2d7ab3;
+  --c-page:#f5f8fc; --c-section:#edf2f9; --c-card:#e4ecf5; --c-stripe:#eef3fa;
+  --c-thead:#1a4a7a; --c-border:#c0d0e2; --c-accent2:#2d7ab3;
+  --c-text:#142840; --c-muted:#5a7a96; --c-cover-text:#e8f0f8; --c-cover-muted:#7a9bb8;
+  --c-code-bg:#142840; --c-code-text:#dbe9f6;
+}
+html,body{margin:0;padding:0;width:794px;background:var(--c-cover-bg);color:var(--c-text);font-family:'Vazirmatn','DejaVu Sans',sans-serif;}
+@media screen{html{height:auto;display:flex;justify-content:center;background:var(--c-cover-bg);}body{margin:20px auto;box-shadow:0 0 60px rgba(0,0,0,.45);}}
+body{line-break:strict;word-break:normal;overflow-wrap:break-word;}
+p,td,li{line-break:strict;}
+p{text-align:justify;margin:0 0 10px;font-size:13.5px;line-height:1.95;}
+/* ---------- Cover ---------- */
+.cover{width:794px;height:1123px;position:relative;background:radial-gradient(circle at 12% 8%,rgba(45,122,179,.15) 0%,rgba(45,122,179,0) 34%),radial-gradient(circle at 88% 94%,rgba(45,122,179,.13) 0%,rgba(45,122,179,0) 38%),var(--c-cover-bg);color:var(--c-cover-text);break-after:page;}
+.cover .frame{position:absolute;top:80px;bottom:80px;left:60px;right:60px;border:2px solid var(--c-accent);}
+.cover .inner{position:absolute;top:80px;bottom:80px;left:60px;right:60px;padding:46px 50px;display:flex;flex-direction:column;box-sizing:border-box;}
+.cv-kicker{font-size:11px;font-weight:500;letter-spacing:5px;color:var(--c-accent);text-transform:uppercase;direction:ltr;text-align:left;}
+.cv-hero{margin-top:120px;font-size:52px;font-weight:900;line-height:1.15;color:var(--c-cover-text);text-shadow:0 0 24px rgba(77,168,218,.25);}
+.cv-hero-en{margin-top:10px;font-size:24px;font-weight:700;letter-spacing:2px;color:var(--c-accent);direction:ltr;text-align:right;}
+.cv-sub{margin-top:26px;font-size:16px;font-weight:500;color:var(--c-cover-text);opacity:.9;line-height:1.7;}
+.cv-summary{margin-top:22px;font-size:13.5px;line-height:1.9;color:var(--c-cover-muted);max-width:540px;text-align:justify;}
+.cv-meta{margin-top:auto;display:flex;gap:10px;flex-wrap:wrap;max-width:100%;}
+.cv-chip{border:1px solid rgba(77,168,218,.45);color:var(--c-cover-text);font-size:11px;padding:6px 14px;border-radius:999px;letter-spacing:.5px;}
+.cv-footer{margin-top:26px;display:flex;justify-content:space-between;font-size:10px;letter-spacing:3px;color:var(--c-cover-muted);text-transform:uppercase;direction:ltr;}
+/* ---------- Body layout ---------- */
+.main-content{background:var(--c-page);padding:56px 58px 46px 58px;}
+.chapter-header{break-after:avoid;break-inside:avoid;margin-top:26px;margin-bottom:14px;}
+.chapter-header:first-child{margin-top:0;}
+.sec-tag{font-size:10px;font-weight:700;letter-spacing:4px;color:var(--c-accent2);text-transform:uppercase;direction:ltr;text-align:right;}
+.sec-title{font-size:21px;font-weight:900;color:var(--c-text);margin-top:4px;line-height:1.35;}
+.divider{width:64px;height:3px;background:var(--c-accent2);border-radius:2px;margin-top:8px;}
+h3{font-size:14.5px;font-weight:700;color:var(--c-text);margin:16px 0 8px;break-after:avoid;}
+ul{margin:4px 0 10px;padding-right:20px;}
+li{font-size:13px;line-height:1.9;margin-bottom:4px;text-align:justify;}
+strong{font-weight:700;}
+.note{background:var(--c-card);border-right:3px solid var(--c-accent2);border-radius:8px;padding:10px 14px;font-size:12.5px;line-height:1.85;margin:10px 0;break-inside:avoid;color:var(--c-text);}
+code.ic{direction:ltr;unicode-bidi:embed;font-family:'DejaVu Sans Mono',monospace;font-size:.86em;background:var(--c-card);border:1px solid var(--c-border);border-radius:4px;padding:0 5px;color:var(--c-thead);}
+pre.code{direction:ltr;text-align:left;font-family:'DejaVu Sans Mono',monospace;font-size:10.3px;line-height:1.62;background:var(--c-code-bg);color:var(--c-code-text);border-radius:9px;padding:13px 16px;margin:10px 0;white-space:pre-wrap;overflow-wrap:anywhere;break-inside:avoid;}
+table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0;break-inside:avoid;}
+thead{display:table-header-group;}
+tr{break-inside:avoid;}
+th{background:var(--c-thead);color:#ffffff;font-weight:700;padding:8px 10px;text-align:right;font-size:12px;}
+td{border:1px solid var(--c-border);padding:7px 10px;text-align:right;vertical-align:top;line-height:1.7;}
+tbody tr:nth-child(even) td{background:var(--c-stripe);}
+td .ltr, .ltr{direction:ltr;unicode-bidi:embed;}
+td code, td .mono{direction:ltr;unicode-bidi:embed;font-family:'DejaVu Sans Mono',monospace;font-size:11px;}
+/* ---------- Gotcha cards ---------- */
+.gotcha{background:#ffffff;border:1px solid var(--c-border);border-right:3px solid var(--c-accent2);border-radius:10px;padding:12px 16px;margin-bottom:12px;break-inside:avoid;}
+.gotcha .g-t{font-size:13.5px;font-weight:700;color:var(--c-thead);}
+.gotcha .g-n{display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:50%;background:var(--c-thead);color:#fff;font-size:12px;font-weight:700;margin-left:8px;}
+.gotcha p{margin:6px 0 0;font-size:12.8px;}
+/* ---------- Checklist ---------- */
+.check{background:#ffffff;border:1px solid var(--c-border);border-radius:10px;padding:14px 18px;margin-bottom:12px;break-inside:avoid;}
+.check .c-t{font-size:13px;font-weight:700;color:var(--c-thead);margin-bottom:8px;}
+.check ul{list-style:none;padding:0;margin:0;}
+.check li{font-size:12.8px;margin-bottom:6px;padding-right:24px;position:relative;}
+.check li::before{content:'☐';position:absolute;right:0;top:0;color:var(--c-accent2);font-size:14px;}
+.closing{margin-top:22px;background:var(--c-cover-bg);color:var(--c-cover-muted);border-radius:12px;padding:20px 24px;break-inside:avoid;}
+.closing .en{font-size:10px;letter-spacing:3px;color:var(--c-accent);text-transform:uppercase;direction:ltr;text-align:left;}
+.closing .fa{font-size:12.5px;line-height:1.9;margin-top:8px;text-align:justify;}
+.closing .fa b{color:var(--c-cover-text);}
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<div class="cover">
+  <div class="frame"></div>
+  <div class="inner">
+    <div class="cv-kicker">PROJECT HANDOFF · DEVELOPER ONBOARDING BRIEF</div>
+    <div class="cv-hero">سند تحویل پروژه</div>
+    <div class="cv-hero-en">PROJECT HANDOFF</div>
+    <div class="cv-sub">دستورالعمل تحویل به توسعه‌دهنده / ایجنت بعدی<br>پروژهٔ چت هوشمند — Smart Chat</div>
+    <div class="cv-summary">این سند همه‌چیزِ لازم برای شروع کار را یک‌جا جمع می‌کند: خلاصهٔ تحویل و دستورهای راه‌اندازی، نقشهٔ مسیرها، ده نکتهٔ بحرانی که نقضشان باگ تولید می‌کند، قرارداد فرانت-بک، چک‌لیست صحت‌سنجی پس از تغییرات، تاریخچهٔ هفت تسک و مسیر پیشنهادی ادامهٔ کار. جزئیات کامل‌تر در README.md (داکیومنت کامل) و worklog.md (گزارش خام تسک‌ها) در دسترس است.</div>
+    <div class="cv-meta">
+      <span class="cv-chip">نسخهٔ سند ۱.۰</span>
+      <span class="cv-chip">۱۴ سپتامبر ۲۰۲۶ · ۲۳ شهریور ۱۴۰۵</span>
+      <span class="cv-chip">Next.js 16 + app.js</span>
+      <span class="cv-chip">۷ تسک تکمیل‌شده</span>
+    </div>
+    <div class="cv-footer"><span>SMART CHAT · HANDOFF V1.0</span><span>FREEMODELS-POWERED</span></div>
+  </div>
+</div>
+
+<!-- ================= BODY ================= -->
+<div class="main-content">
+
+  <!-- 1 TLDR -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 01</div>
+    <div class="sec-title">خلاصهٔ تحویل | TL;DR</div>
+    <div class="divider"></div>
+  </div>
+  <p><b>چت هوشمند</b> یک اپ چت AI فارسی (RTL، تم تاریک) متصل به سرویس رایگان freemodels است که در قالب <b>دو نسخهٔ معادل</b> تحویل می‌شود: (۱) اپ Next.js 16 در <code class="ic">src/</code> و (۲) فایل تک‌فایل Node خالص <code class="ic">app.js</code> بدون هیچ وابستگی. هر دو نسخه UI چت کامل + پروکسی استریم آپستریم + <b>سه اندپوینت API سازگار OpenAI/Anthropic</b> با کلیدهای محلی (<code class="ic">api-keys.json</code>) دارند. همه‌چیز تست شده و کار می‌کند؛ تنها مشکل شناخته‌شده، خطای موقت 429 سهمیهٔ خود سرویس رایگان است که به‌درستی به کاربر نشان داده می‌شود.</p>
+  <pre class="code"># سه دستور که همه‌چیز را راه می‌اندازد
+bun install &amp;&amp; bun run dev   # نسخهٔ Next.js → http://localhost:3000
+node app.js                  # نسخهٔ تک‌فایل (پورت 3000 پیش‌فرض؛ PORT=xxxx برای تغییر)
+node --check app.js          # قبل از هر تغییر در app.js این را اجرا کن</pre>
+
+  <!-- 2 Where things live -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 02</div>
+    <div class="sec-title">نقشهٔ مسیرها | Where Things Live</div>
+    <div class="divider"></div>
+  </div>
+  <table>
+    <thead><tr><th style="width:34%">موضوع</th><th>مسیر</th></tr></thead>
+    <tbody>
+      <tr><td>UI چت (Next)</td><td><span class="mono">src/app/page.tsx</span> (~۹۰۰ خط، client component)</td></tr>
+      <tr><td>پروکسی چت (Next)</td><td><span class="mono">src/app/api/chat/route.ts</span> ← <span class="mono">src/lib/upstream.ts</span></td></tr>
+      <tr><td>API سازگار OpenAI</td><td><span class="mono">src/app/v1/chat/completions/route.ts</span> + <span class="mono">src/app/v1/models/route.ts</span></td></tr>
+      <tr><td>API سازگار Anthropic</td><td><span class="mono">src/app/v1/messages/route.ts</span></td></tr>
+      <tr><td>پارسر SSE جهانی</td><td><span class="mono">src/lib/sse.ts</span> — «قلب» تبدیل فرمت؛ تغییر آپستریم = اول همین فایل</td></tr>
+      <tr><td>رندر مارک‌داون امن</td><td><span class="mono">src/lib/markdown.ts</span></td></tr>
+      <tr><td>لیست مدل‌ها (منبع واحد)</td><td><span class="mono">src/lib/models.ts</span> + ثابت <span class="mono">FM_MODELS</span> در <span class="mono">app.js:66</span></td></tr>
+      <tr><td>کلیدها</td><td><span class="mono">api-keys.json</span> (+ <span class="mono">src/lib/apikeys.ts</span> / <span class="mono">loadOrCreateKeys()</span> در app.js)</td></tr>
+      <tr><td>UI چت (تک‌فایل)</td><td><span class="mono">app.js</span>: <span class="mono">PAGE_CSS</span> (خط 165) · <span class="mono">PAGE_JS</span> (خط 424) · <span class="mono">PAGE_HTML</span> (خط 1942) · هندلرهای سرور (خط 2083+)</td></tr>
+      <tr><td>لوگوها</td><td><span class="mono">public/</span> (۴ فایل واقعی) + base64 در <span class="mono">EMBEDDED_LOGOS</span> (app.js:79) · ابزار: <span class="mono">scripts/embed_logos.py</span></td></tr>
+      <tr><td>تاریخچهٔ کامل کار</td><td><span class="mono">worklog.md</span> (۷ تسک با جزئیات تست)</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><b>آپستریم:</b> <span class="mono">https://freemodels-chat.freemodels.workers.dev/</span> — فقط با هدرهای جعلی مرورگر (Origin/Referer = <span class="mono">https://freemodels.pro</span>) پاسخ می‌دهد. این ثابت در <span class="mono">src/lib/upstream.ts</span> و app.js ست شده؛ اگر روزی عوض شد، هر دو جا را تغییر بده.</div>
+
+  <!-- 3 Critical gotchas -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 03</div>
+    <div class="sec-title">نکات بحرانی | Critical Gotchas</div>
+    <div class="divider"></div>
+  </div>
+  <p>این‌ها تصمیم‌های عمدی و تجربه‌شده‌اند؛ نقضشان مستقیماً باگ تولید می‌کند. قبل از دست‌زدن به کد، هر ده مورد را بخوان.</p>
+  <div class="gotcha"><div class="g-t"><span class="g-n">۱</span>در PAGE_JS و PAGE_CSS داخل app.js مطلقاً backtick و ${ و &lt;/script&gt; ننویس</div>
+  <p>کل UI داخل <span class="mono">String.raw</span> template literal است؛ یک backtick اضافه = فایل خراب. backtick مارک‌داون با <span class="mono">\x60</span> ساخته می‌شود (کل فایل فقط ۳ جفت delimiter دارد). <b>پس از هر تغییر:</b> <span class="mono">node --check app.js</span> + استخراج PAGE_JS و بررسی سینتکس جداگانهٔ آن.</p></div>
+  <div class="gotcha"><div class="g-t"><span class="g-n">۲</span>از fetch برای آپستریم استفاده نکن</div>
+  <p>fetch ارسال <span class="mono">Origin</span>/<span class="mono">Referer</span> را ممنوع می‌کند و آپستریم CORS باز ندارد. باید <span class="mono">node:https</span> بماند (هر دو نسخه).</p></div>
+  <div class="gotcha"><div class="g-t"><span class="g-n">۳</span>Pipe مستقیم، نه بافر</div>
+  <p>استریم باید تکه‌به‌تکه رد شود (<span class="mono">Cache-Control: no-cache, no-transform</span> + <span class="mono">X-Accel-Buffering: no</span>). تجمیع بافر = مرگ استریم زنده. قطع کلاینت ← destroy فوری آپستریم (نشتی اتصال ممنوع).</p></div>
+  <div class="gotcha"><div class="g-t"><span class="g-n">۴</span>z-index پیکر مدل را به‌هم نریز</div>
+  <p><span class="mono">#topbar</span> = z-55، <span class="mono">#sidebar</span> = z-50، مودال = 60، توست = 70. هر flex-item با z-index استکینگ‌کانتکست می‌سازد؛ اگر پاپ‌آپ زیر سایدبار رفت، این ترتیب را خراب نکرده باشی. لنگر پاپ‌آپ <span class="mono">right-0</span> فیزیکی است تا در RTL روی چت باز شود نه زیر سایدبار.</p></div>
+  <div class="gotcha"><div class="g-t"><span class="g-n">۵</span>hydration: localStorage فقط بعد از mount</div>
+  <p>خواندن <span class="mono">fm_chats</span>/<span class="mono">fm_settings</span> فقط در <span class="mono">useEffect</span> — نه در رندر اولیه؛ وگرنه hydration mismatch می‌گیری.</p></div>
+  <div class="gotcha"><div class="g-t"><span class="g-n">۶</span>خطای 429 آپستریم باگ نیست</div>
+  <p>«providers exhausted» رفتار سرویس رایگان است؛ نباید حذف یا مخفی شود — فقط شفاف نمایش داده می‌شود (حباب قرمز در UI / کد وضعیت درست در API). retry پس از چند ثانیه معمولاً موفق است.</p></div>
+  <div class="gotcha"><div class="g-t"><span class="g-n">۷</span>هر دو نسخه باید همگام بمانند</div>
+  <p>هر قابلیت/فیکس در <span class="mono">src/</span> باید معادل در PAGE_JS/هندلرهای app.js هم بگیرد (و بالعکس). لیست مدل‌ها فقط از منبع واحد (<span class="mono">models.ts</span> / <span class="mono">FM_MODELS</span>) — هیچ لیست موازی‌ای نساز.</p></div>
+  <div class="gotcha"><div class="g-t"><span class="g-n">۸</span>eslint: app.js در ignores است</div>
+  <p><span class="mono">app.js</span> در <span class="mono">eslint.config.mjs</span> ignores است؛ آن را برنگردان — فایل CommonJS مستقل جزو بیلد Next نیست.</p></div>
+  <div class="gotcha"><div class="g-t"><span class="g-n">۹</span>کلیدها: فایل مشترک + override با env</div>
+  <p><span class="mono">api-keys.json</span> permission 600 دارد؛ env (<span class="mono">OPENAI_API_KEY</span>/<span class="mono">ANTHROPIC_API_KEY</span>) فایل را override می‌کند؛ هر دو کلید روی هر دو اندپوینت پذیرفته می‌شوند (رفتار عمدی).</p></div>
+  <div class="gotcha"><div class="g-t"><span class="g-n">۱۰</span>/v1/messages باید سخت‌گیر بماند</div>
+  <p><span class="mono">model</span> و <span class="mono">max_tokens</span> اجباری‌اند (400 با پیام <span class="mono">Field required</span>) — کلاینت‌های Anthropic به این خطاها تکیه دارند.</p></div>
+
+  <!-- 4 Contract -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 04</div>
+    <div class="sec-title">قرارداد فرانت-بک | Frontend ↔ Backend Contract</div>
+    <div class="divider"></div>
+  </div>
+  <pre class="code">POST /api/chat   {messages:[{role,content}], modelId, thinking, deepSearch, stream}
+  → استریم SSE سبک OpenAI آپستریم (delta.content + delta.reasoning_content) یا JSON
+  → خطا: {error:{message}} با کد 413/502/504 یا عبور کد آپستریم (مثلاً 429)
+
+GET /api/ping → {status:"ok"|"error", ms:number, sample:string(&lt;=200)}
+
+GET  /v1/models            → OpenAI list (7 مدل، owned_by=freemodels-&lt;vendor&gt;)
+POST /v1/chat/completions  → chat.completion | chat.completion.chunk + [DONE]
+POST /v1/messages          → message | چرخهٔ message_start → ... → message_stop (+ thinking block)
+GET  /api/keys             → {openai, anthropic}  (فقط Next؛ app.js با window.__FM__ تزریق می‌کند)</pre>
+  <p><b>نرمال‌سازی مدل</b> (<span class="mono">resolveModelId</span>): «Claude Fable 5.1» / «claude_fable 5.1» / «claude-fable-5.1» همه یکی می‌شوند؛ ورودی خالی ← <span class="mono">claude-fable-5.1</span>؛ ورودی ناشناخته دست‌نخورده عبور می‌کند.</p>
+
+  <!-- 5 Verification checklist -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 05</div>
+    <div class="sec-title">چک‌لیست صحت‌سنجی | Verification Checklist</div>
+    <div class="divider"></div>
+  </div>
+  <p>پس از هر تغییر، این چک‌لیست را اجرا کنید — ترتیب موارد از سرور به مرورگر است و در مجموع حدود ۱۰ دقیقه زمان می‌برد. اگر موردی شکست خورد، قبل از ادامه کار ریشه‌یابی کنید؛ این لیست عیناً همان معیارهای پذیرش تسک‌های ۳ و ۷ است.</p>
+  <div class="check"><div class="c-t">سرور (curl)</div>
+    <ul>
+      <li><span class="mono">GET /</span> → 200 (Next یا app.js)</li>
+      <li><span class="mono">OPTIONS /api/chat</span> → 204 با <span class="mono">Access-Control-Allow-Origin: *</span></li>
+      <li><span class="mono">GET /api/ping</span> → <span class="mono">{"status":"ok",...}</span> (تاخیر ۲–۳ ثانیه طبیعی است؛ خطای سهمیهٔ آپستریم هم endpoint را سالم نگه می‌دارد)</li>
+      <li><span class="mono">GET /v1/models</span> با کلید → ۷ مدل؛ بدون کلید → 401</li>
+      <li><span class="mono">POST /v1/chat/completions</span> استریم → چانک‌ها + [DONE]؛ غیراستریم → usage</li>
+      <li><span class="mono">POST /v1/messages</span> بدون max_tokens → 400؛ با آن → چرخهٔ کامل رویدادها</li>
+      <li>مسیر ناشناس → 404؛ بدنهٔ >5MB → 413 (app.js)</li>
+      <li><span class="mono">bun run lint</span> → 0 خطا؛ <span class="mono">node --check app.js</span> → سالم</li>
+    </ul>
+  </div>
+  <div class="check"><div class="c-t">مرورگر (هر دو نسخه)</div>
+    <ul>
+      <li>پیکر مدل: ۳ گروه / ۷ مدل / ۴ لوگو، انتخاب مدل ماندگار پس از reload، بستن با Esc و کلیک بیرون</li>
+      <li>ارسال پیام → استریم زنده + باکس «💭 تفکر» + آمار؛ Esc وسط استریم → «⏹ متوقف شد»</li>
+      <li>ویرایش اینلاین پیام کاربر / بازتولید ↻ / خروجی MD و JSON</li>
+      <li>رفرش → تاریخچه و تنظیمات سر جایشان (<span class="mono">fm_chats</span>/<span class="mono">fm_settings</span>)</li>
+      <li>موبایل 390px: هدر جمع‌شونده، همبرگر، تارگت 44px، کامپوزر چسبان</li>
+    </ul>
+  </div>
+
+  <!-- 6 Task history -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 06</div>
+    <div class="sec-title">تاریخچهٔ تسک‌ها | Task History</div>
+    <div class="divider"></div>
+  </div>
+  <p>خلاصهٔ هفت تسک اجراشده (گزارش کامل با جزئیات تست در <code class="ic">worklog.md</code>):</p>
+  <table>
+    <thead><tr><th style="width:8%">#</th><th style="width:50%">تسک</th><th>نکتهٔ ماندگار</th></tr></thead>
+    <tbody>
+      <tr><td>۱</td><td>بک‌اند پروکسی /api/chat + /api/ping + کتابخانه‌های مشترک</td><td>تصمیم node:https برای هدرهای جعلی</td></tr>
+      <tr><td>۲</td><td>فرانت‌اند کامل RTL فارسی</td><td>بدون hydration mismatch</td></tr>
+      <tr><td>۳</td><td>تأیید مرورگری end-to-end</td><td>استریم ۲۸۶ تکه؛ همهٔ اکشن‌ها ✓</td></tr>
+      <tr><td>۴</td><td>تک‌فایل app.js</td><td>قیود PAGE_JS</td></tr>
+      <tr><td>۵</td><td>تأیید مستقل app.js</td><td>تست ۶ مسیر + 413</td></tr>
+      <tr><td>۶</td><td>۷ مدل + کلیدها + اندپوینت‌های /v1 (هر دو نسخه)</td><td>منبع واحد FM_MODELS؛ مودال 🔑</td></tr>
+      <tr><td>۷</td><td>بازیابی workspace از tar + پیکر مدل گروهی مطابق سایت</td><td>رفع باگ z-index stacking؛ embed لوگوها</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 7 Next steps -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 07</div>
+    <div class="sec-title">مسیر پیشنهادی ادامهٔ کار | Suggested Next Steps</div>
+    <div class="divider"></div>
+  </div>
+  <ul>
+    <li><b>Retry با backoff برای 429</b> در لایهٔ پروکسی — بهترین بهبود تجربهٔ کاربر با کمترین تغییر.</li>
+    <li><b>افزودن group/vendor به پاسخ /v1/models</b> به‌صورت فیلد اضافی سازگار با OpenAI.</li>
+    <li><b>اسکریپت smoke خودکار</b> برای چک‌لیست بخش ۵ (bash یا node).</li>
+    <li><b>استقرار:</b> <span class="mono">bun run build &amp;&amp; bun run start</span> (standalone) یا <span class="mono">node app.js</span> با systemd/pm2؛ پشت nginx حتماً <span class="mono">proxy_buffering off</span>.</li>
+    <li><b>اگر آپستریم فرمتش عوض شد:</b> اول <span class="mono">src/lib/sse.ts</span> (و معادل <span class="mono">makeUpstreamParser</span> در app.js) را ببین — پارسر جهانی است و الگوهای شناخته‌شده را handle می‌کند.</li>
+  </ul>
+
+  <div class="closing">
+    <div class="en">SMART CHAT — PROJECT HANDOFF · V1.0 · SEPTEMBER 2026</div>
+    <div class="fa">این سند را به‌همراه <b>README.md</b> (داکیومنت کامل) بخوانید؛ سند تحویل عمداً کوتاه و عملیاتی است و جزئیات معماری و مرجع API در داکیومنت کامل آمده است. پس از هر تغییر مهم، هر دو فایل Markdown و نسخه‌های PDF را همگام به‌روزرسانی کنید و ردیف جدیدی به <b>worklog.md</b> اضافه کنید تا زنجیرهٔ تاریخچهٔ پروژه قطع نشود.</div>
+  </div>
+
+</div>
+</body>
+</html>

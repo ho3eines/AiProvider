@@ -1,0 +1,586 @@
+     1→   401→```css
+     2→   402→.vline {
+     3→   403→  position: absolute;
+     4→   404→  top: var(--content-top);     /* align with first text element */
+     5→   405→  bottom: var(--content-bottom); /* align with last text element */
+     6→   406→}
+     7→   407→.hline {
+     8→   408→  width: max(100%, 200px);     /* at least as wide as parent text container */
+     9→   409→}
+    10→   410→```
+    11→   411→
+    12→   412→**Checklist:**
+    13→   413→- [ ] Every vertical line’s height matches its adjacent text block span
+    14→   414→- [ ] Every horizontal line’s width ≥ widest text element in its zone
+    15→   415→- [ ] No decorative line is shorter than the text it accompanies
+    16→   416→
+    17→   417→---
+    18→   418→
+    19→   419→## S3.8 - Vertical Balance (Anti-Top-Heavy Layout)
+    20→   420→
+    21→   421→**Problem:** Content clusters at top of page, bottom 40%+ is dead whitespace.
+    22→   422→
+    23→   423→**Rule:** When total content height < 50% of page height, switch to centered distribution (flexbox `justify-content: center`). Otherwise use anchor grid:
+    24→   424→
+    25→   425→| Content Volume | Title Anchor | Summary Anchor | Meta Anchor |
+    26→   426→|---------------|-------------|----------------|-------------|
+    27→   427→| **Sparse** (fill < 50%) | Centered mode | Centered mode | Centered mode |
+    28→   428→| **Normal** (fill 50-80%) | `H * 0.30` | `H * 0.48` | `H * 0.70` |
+    29→   429→| **Dense** (fill > 80%) | `H * 0.20` | `H * 0.40` | `H * 0.65` |
+    30→   430→
+    31→   431→**CJK Title Size Compensation:** CJK characters appear smaller at same pt size. Increase by 15-20%:
+    32→   432→- CJK Hero Title: 50-80pt (Latin: 45-65pt)
+    33→   433→- CJK Kicker: 11-12pt (Latin: 9pt)
+    34→   434→- CJK Summary: 17-20pt (Latin: 16-18pt)
+    35→   435→
+    36→   436→**Checklist:**
+    37→   437→- [ ] No cover has >40% dead whitespace at the bottom
+    38→   438→- [ ] CJK titles are 15-20% larger than equivalent Latin titles
+    39→   439→- [ ] Sparse-content covers use centered distribution
+    40→   440→
+    41→   441→---
+    42→   442→
+    43→   443→## S3.9 - Percentage Positioning Requires Known-Size Container
+    44→   444→
+    45→   445→**Problem:** `top: XX%` resolves against containing block’s height. If height is undefined (all children absolutely positioned), percentages collapse and elements stack.
+    46→   446→
+    47→   447→**Iron rule:** Container with `top: XX%` children MUST have deterministic height (`height: 100%`, `inset: 0`, or `top` + `bottom` pair).
+    48→   448→
+    49→   449→```css
+    50→   450→/* ✅ Safest: flat structure with px values */
+    51→   451→.cover { position: relative; width: 794px; height: 1123px; }
+    52→   452→.kicker { position: absolute; top: 225px; left: 95px; }
+    53→   453→.title  { position: absolute; top: 292px; left: 95px; }
+    54→   454→
+    55→   455→/* ✅ OK: wrapper with inset:0 gives it known height */
+    56→   456→.content-left { position: absolute; inset: 0; width: 55%; }
+    57→   457→.title { position: absolute; top: 26%; }  /* 26% of 1123px ✓ */
+    58→   458→
+    59→   459→/* ❌ BANNED: wrapper without height, percentage is undefined */
+    60→   460→.content-left { position: absolute; left: 12%; top: 0; width: 55%; }
+    61→   461→.title { position: absolute; top: 26%; }  /* 26% of WHAT? → overlap */
+    62→   462→```
+    63→   463→
+    64→   464→---
+    65→   465→
+    66→   466→# PART 4: COVER COLOR RULES
+    67→   467→
+    68→   468→> Cover colors must be consistent with the body color system - they cannot exist independently.
+    69→   469→> **The cascade palette CSS output includes `--c-*` aliases** that map directly to cover template variables. Paste the CSS output into cover HTML's `:root` block — template 01 works without any manual color translation.
+    70→   470→
+    71→   471→```
+    72→   472→Cover primary    = Body theme color
+    73→   473→Cover secondary  = Primary lightness variant (±20% lightness)
+    74→   474→Cover background = Pure white / very light gray / primary at 5-8% opacity
+    75→   475→```
+    76→   476→
+    77→   477→### Absolutely Forbidden
+    78→   478→
+    79→   479→- ❌ Dark large-area solid backgrounds (dark blue, dark green, black filling the page)
+    80→   480→- ❌ Gradient backgrounds (any `linear-gradient` / `radial-gradient` as large-area fill)
+    81→   481→- ❌ High-saturation color schemes
+    82→   482→- ❌ Rainbow / multi-color gradients
+    83→   483→- ❌ Dense textures or patterns
+    84→   484→- ❌ Piling on decorative elements - restraint > clutter
+    85→   485→- ❌ More than 2 typefaces on a cover
+    86→   486→- ❌ Centered text + gradient/solid background (PowerPoint aesthetic)
+    87→   487→
+    88→   488→### Safe Cover Color Schemes (Reference Only)
+    89→   489→
+    90→   490→> ⚠️ These are **examples for reference**. In normal workflow, run `palette.cascade --title "<title>" --mode minimal --format css` to generate the actual cover colors. Do NOT copy these hex values directly.
+    91→   491→
+    92→   492→> ✅ **Cascade CSS output includes `--c-*` aliases.** The `--format css` output automatically appends cover-compatible aliases (`--c-bg`, `--c-accent`, `--c-text`, `--c-muted`, `--c-mid`, `--c-surface`) mapped from cascade roles. Template 01 can consume the CSS output directly — no manual variable translation needed.
+    93→   493→>
+    94→   494→> | Cover alias | Cascade source | Tier | Purpose |
+    95→   495→> |------------|---------------|------|---------|
+    96→   496→> | `--c-bg` | `--page-bg` | XL | Cover background |
+    97→   497→> | `--c-accent` | `--accent` | XS | Decorative lines, labels |
+    98→   498→> | `--c-text` | `--text-primary` | text | Title text |
+    99→   499→> | `--c-muted` | `--text-muted` | text | Subtitle, footer |
+   100→   500→> | `--c-mid` | `--header-fill` | M | Structural fills |
+   101→   501→> | `--c-surface` | `--card-bg` | L | Card/container bg |
+   102→   502→
+   103→   503→| Name | Primary | Secondary | Background | Use Case |
+   104→   504→|------|---------|-----------|------------|----------|
+   105→   505→| Ink Stone | `#1a1a2e` | `#4a4a5e` | `#fafafa` | Business, formal |
+   106→   506→| Indigo | `#1e3a5f` | `#2d5f8a` | `#f5f8fb` | Technology, reports |
+   107→   507→| Warm Chestnut | `#5c3d2e` | `#8a6b5a` | `#faf6f3` | Culture, branding |
+   108→   508→| Moss Green | `#2d4a3e` | `#4a7a6a` | `#f5f8f6` | Nature, health |
+   109→   509→| Deep Crimson | `#6b2d3e` | `#9a4a5e` | `#faf5f6` | Traditional, elegant |
+   110→   510→
+   111→   511→---
+   112→   512→
+   113→   513→# PART 4.5: ACADEMIC COVER TEMPLATES (Templates 03-04)
+   114→   514→
+   115→   515→> **Academic covers are exempt from PART 4 color rules.** Academic papers, theses, and research reports traditionally use dark backgrounds with light text - this is the established scholarly visual language. Templates 03-04 follow LaTeX title page conventions translated to HTML/CSS.
+   116→   516→
+   117→   517→**All 2 templates share these rules:**
+   118→   518→- Page size: `width: 794px; height: 1123px` (A4 at 96dpi)
+   119→   519→- Full-bleed dark background (edge-to-edge, no margins)
+   120→   520→- Serif font for titles (Playfair Display / Noto Serif SC), sans-serif for metadata
+   121→   521→- Generated as HTML → Playwright `page.pdf()` → pypdf merge (same pipeline as Report covers)
+   122→   522→- `<link>` tag for Google Fonts (NOT `@import`)
+   123→   523→
+   124→   524→**Content slots (all templates):**
+   125→   525→| Slot | Required | Example |
+   126→   526→|------|----------|---------|
+   127→   527→| `label` | Optional | `RESEARCH PAPER`, `博士论文` |
+   128→   528→| `title` | **Required** | Paper title (auto-wrap, max 3 lines) |
+   129→   529→| `subtitle` | Optional | Subtitle or abstract excerpt |
+   130→   530→| `authors` | **Required** | Author name(s) |
+   131→   531→| `institution` | Optional | University / lab / affiliation |
+   132→   532→| `keywords` | Optional | Keyword list |
+   133→   533→| `footer_left` | Optional | Journal name, DOI |
+   134→   534→| `footer_right` | Optional | Date, version |
+   135→   535→
+   136→   536→---
+   137→   537→
+   138→   538→## Template 03: Academic Vertical Anchor - Dark bg + Left vertical line + Left-aligned
+   139→   539→
+   140→   540→**Design intent:** Emulates the classic arXiv/preprint cover. A bold vertical accent line anchors the left edge, all text left-aligned with generous vertical rhythm. Serious, no-frills.
+   141→   541→
+   142→   542→```
+   143→   543→┌─────────────────────────────┐
+   144→   544→│ ┃                           │
+   145→   545→│ ┃  LABEL (9pt, accent)      │  ← y = H - 3.5cm
+   146→   546→│ ┃                           │
+   147→   547→│ ┃  Title (32pt Bold)        │  ← y = H - 6cm, line-height 42pt
+   148→   548→│ ┃  Title line 2             │
+   149→   549→│ ┃                           │
+   150→   550→│ ┃  Subtitle (12pt)          │  ← y = H - 14cm
+   151→   551→│ ┃                           │
+   152→   552→│ ┃  Authors (12pt, white)    │  ← y = H - 18cm
+   153→   553→│ ┃  Institution (10pt)       │
+   154→   554→│ ┃                           │
+   155→   555→│ ┃  Footer L       Footer R  │
+   156→   556→└─────────────────────────────┘
+   157→   557→┃ = vertical accent line at x=1.5cm, 2.5pt width
+   158→   558→```
+   159→   559→
+   160→   560→**Best for:** Research papers, technical reports, arXiv preprints
+   161→   561→
+   162→   562→**HTML structure:**
+   163→   563→```html
+   164→   564→<!DOCTYPE html>
+   165→   565→<html lang="en">
+   166→   566→<head>
+   167→   567→  <meta charset="UTF-8">
+   168→   568→  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Noto+Serif+SC:wght@400;700;900&family=Inter:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+   169→   569→  <style>
+   170→   570→    @page { size: 794px 1123px; margin: 0; }
+   171→   571→    :root {
+   172→   572→      --c-bg: #162032;
+   173→   573→      --c-accent: #8B7E5A;
+   174→   574→      --c-text: #FFFFFF;
+   175→   575→      --c-muted: #8898A8;
+   176→   576→      --c-footer: #607080;
+   177→   577→    }
+   178→   578→    html, body { margin: 0; padding: 0; width: 794px; height: 1123px; background: var(--c-bg); color: var(--c-text); font-family: 'Inter', 'Noto Sans SC', sans-serif; }
+   179→   579→    @media screen {
+   180→   580→      html { height: auto; display: flex; justify-content: center; min-height: 100vh; background: var(--c-bg); }
+   181→   581→      body { transform-origin: top center; scale: min(1, calc(100vw / 794), calc(100vh / 1123)); margin: 0 auto; box-shadow: 0 0 60px rgba(0,0,0,0.3); }
+   182→   582→    }
+   183→   583→    .cover { width: 794px; height: 1123px; position: relative; box-sizing: border-box; }
+   184→   584→    .vline { position: absolute; left: 57px; top: 76px; bottom: 76px; width: 2.5px; background: var(--c-accent); }
+   185→   585→    .content { position: absolute; left: 83px; right: 76px; top: 0; bottom: 0; }
+   186→   586→    .label { position: absolute; top: 132px; font-size: 9pt; color: var(--c-accent); letter-spacing: 3px; text-transform: uppercase; font-family: 'Inter', 'Noto Sans SC', sans-serif; }
+   187→   587→    .title { position: absolute; top: 228px; font-size: 32pt; font-weight: 700; line-height: 1.3; font-family: 'Playfair Display', 'Noto Serif SC', serif; color: var(--c-text); max-width: 580px; }
+   188→   588→    .subtitle { position: absolute; top: 530px; font-size: 12pt; line-height: 1.5; color: var(--c-muted); max-width: 500px; }
+   189→   589→    .authors { position: absolute; top: 680px; font-size: 12pt; color: var(--c-text); }
+   190→   590→    .institution { position: absolute; top: 740px; font-size: 10pt; color: var(--c-muted); line-height: 1.4; }
+   191→   591→    .footer { position: absolute; bottom: 76px; left: 0; right: 0; display: flex; justify-content: space-between; font-size: 9pt; color: var(--c-footer); }
+   192→   592→  </style>
+   193→   593→</head>
+   194→   594→<body>
+   195→   595→  <div class="cover">
+   196→   596→    <div class="vline"></div>
+   197→   597→    <div class="content">
+   198→   598→      <div class="label"><!-- LABEL --></div>
+   199→   599→      <div class="title"><!-- TITLE --></div>
+   200→   600→      <div class="subtitle"><!-- SUBTITLE --></div>
+   201→   601→      <div class="authors"><!-- AUTHORS --></div>
+   202→   602→      <div class="institution"><!-- INSTITUTION --></div>
+   203→   603→      <div class="footer">
+   204→   604→        <span><!-- FOOTER_LEFT --></span>
+   205→   605→        <span><!-- FOOTER_RIGHT --></span>
+   206→   606→      </div>
+   207→   607→    </div>
+   208→   608→  </div>
+   209→   609→</body>
+   210→   610→</html>
+   211→   611→```
+   212→   612→
+   213→   613→**Default palette (override via `palette.cascade --intent <intent> --mode dark --format css`):**
+   214→   614→| Name | `--c-bg` | `--c-accent` | `--c-muted` | Use case |
+   215→   615→|------|----------|------------|----------|----------|
+   216→   616→| Deep Sea | `#162032` | `#8B7E5A` | `#8898A8` | General academic |
+   217→   617→| Indigo | `#1e3a5f` | `#2d5f8a` | `#7A90A5` | Technical |
+   218→   618→| Ink Stone | `#1a1a2e` | `#4a4a5e` | `#8080A0` | Formal occasions |
+   219→   619→
+   220→   620→> ⚠️ These are **fallback defaults** when the palette system is unavailable. In normal workflow, run `palette.cascade` to generate mathematically harmonious colors and inject them into the `:root` variables.
+   221→   621→
+   222→   622→---
+   223→   623→
+   224→   624→## Template 04: Academic Symmetric - Dark bg + Top/bottom lines + Centered
+   225→   625→
+   226→   626→**Design intent:** Emulates the classic IEEE/ACM Transactions title page. Perfect bilateral symmetry, thick horizontal rules frame the content zone. Formal and authoritative.
+   227→   627→
+   228→   628→```
+   229→   629→┌─────────────────────────────┐
+   230→   630→│                             │
+   231→   631→│   ══════════════════════    │  ← Top rule y=H-3cm, 2pt
+   232→   632→│                             │
+   233→   633→│        LABEL (centered)     │
+   234→   634→│                             │
+   235→   635→│     Title (28-30pt Bold)    │
+   236→   636→│                             │
+   237→   637→│        Subtitle             │
+   238→   638→│                             │
+   239→   639→│          Authors              │
+   240→   640→│       Institution           │
+   241→   641→│                             │
+   242→   642→│   ══════════════════════    │  ← Bottom rule y=3cm, 2pt
+   243→   643→│      Journal · Date         │
+   244→   644→└─────────────────────────────┘
+   245→   645→```
+   246→   646→
+   247→   647→**Best for:** Top journal submissions, IEEE/ACM papers, theses
+   248→   648→
+   249→   649→**HTML structure:**
+   250→   650→```html
+   251→   651→<!DOCTYPE html>
+   252→   652→<html lang="en">
+   253→   653→<head>
+   254→   654→  <meta charset="UTF-8">
+   255→   655→  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Noto+Serif+SC:wght@400;700;900&family=Inter:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+   256→   656→  <style>
+   257→   657→    @page { size: 794px 1123px; margin: 0; }
+   258→   658→    :root {
+   259→   659→      --c-bg: #162032;
+   260→   660→      --c-accent: #4A90C4;
+   261→   661→      --c-text: #FFFFFF;
+   262→   662→      --c-muted: #90A8C0;
+   263→   663→    }
+   264→   664→    html, body { margin: 0; padding: 0; width: 794px; height: 1123px; background: var(--c-bg); color: var(--c-text); font-family: 'Inter', 'Noto Sans SC', sans-serif; }
+   265→   665→    @media screen {
+   266→   666→      html { height: auto; display: flex; justify-content: center; min-height: 100vh; background: var(--c-bg); }
+   267→   667→      body { transform-origin: top center; scale: min(1, calc(100vw / 794), calc(100vh / 1123)); margin: 0 auto; box-shadow: 0 0 60px rgba(0,0,0,0.3); }
+   268→   668→    }
+   269→   669→    .cover { width: 794px; height: 1123px; position: relative; display: flex; flex-direction: column; align-items: center; box-sizing: border-box; }
+   270→   670→    .rule-top, .rule-bottom { position: absolute; left: 114px; right: 114px; height: 2px; background: var(--c-accent); }
+   271→   671→    .rule-top { top: 114px; }
+   272→   672→    .rule-bottom { bottom: 114px; }
+   273→   673→    .center-block { position: absolute; top: 0; bottom: 0; left: 114px; right: 114px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+   274→   674→    .label { font-size: 9pt; color: var(--c-accent); letter-spacing: 3px; text-transform: uppercase; margin-bottom: 40px; font-family: 'Inter', 'Noto Sans SC', sans-serif; }
+   275→   675→    .title { font-size: 30pt; font-weight: 700; line-height: 1.3; font-family: 'Playfair Display', 'Noto Serif SC', serif; margin-bottom: 24px; max-width: 500px; }
+   276→   676→    .subtitle { font-size: 14pt; color: var(--c-muted); margin-bottom: 40px; max-width: 450px; line-height: 1.5; }
+   277→   677→    .authors { font-size: 12pt; margin-bottom: 12px; }
+   278→   678→    .institution { font-size: 10pt; color: var(--c-muted); line-height: 1.4; }
+   279→   679→    .footer { position: absolute; bottom: 57px; left: 114px; right: 114px; text-align: center; font-size: 9pt; color: var(--c-muted); }
+   280→   680→  </style>
+   281→   681→</head>
+   282→   682→<body>
+   283→   683→  <div class="cover">
+   284→   684→    <div class="rule-top"></div>
+   285→   685→    <div class="rule-bottom"></div>
+   286→   686→    <div class="center-block">
+   287→   687→      <div class="label"><!-- LABEL --></div>
+   288→   688→      <div class="title"><!-- TITLE --></div>
+   289→   689→      <div class="subtitle"><!-- SUBTITLE --></div>
+   290→   690→      <div class="authors"><!-- AUTHORS --></div>
+   291→   691→      <div class="institution"><!-- INSTITUTION --></div>
+   292→   692→    </div>
+   293→   693→    <div class="footer"><!-- FOOTER --></div>
+   294→   694→  </div>
+   295→   695→</body>
+   296→   696→</html>
+   297→   697→```
+   298→   698→
+   299→   699→**Default palette (override via `palette.cascade --intent <intent> --mode dark --format css`):**
+   300→   700→| Name | `--c-bg` | `--c-accent` | `--c-muted` | Use case |
+   301→   701→|------|----------|------------|----------|----------|
+   302→   702→| Midnight Blue | `#162032` | `#4A90C4` | `#90A8C0` | Math/theoretical |
+   303→   703→| Ink Blue | `#0D1B2A` | `#3D5A80` | `#8898A8` | Formal reports |
+   304→   704→| Deep Navy | `#0a1628` | `#5B8DB8` | `#7A9AB5` | Engineering |
+   305→   705→
+   306→   706→> ⚠️ These are **fallback defaults**. In normal workflow, run `palette.cascade` to generate colors and inject into `:root`.
+   307→   707→
+   308→   708→---
+   309→   709→
+   310→   710→---
+   311→   711→
+   312→   712→## Template 06: Institutional - White bg + Black border frame + Structured field slots
+   313→   713→
+   314→   714→**Design intent:** The universal institutional cover. White background with a thick black border frame, all content centered, structured field slots with underline placeholders. Matches the style required by most universities worldwide for thesis proposals, dissertations, and formal institutional documents. Also suitable for government reports and official submissions. Zero decorative elements - the formality IS the design.
+   315→   715→
+   316→   716→**⚠️ This template is exempt from PART 4 Academic Cover Color Rules (dark backgrounds).** It uses a white/light background by design, aligning with institutional formatting requirements.
+   317→   717→
+   318→   718→```
+   319→   719→┌─────────────────────────────────┐
+   320→   720→│  ┌─────────────────────────────┐  │
+   321→   721→│  │                             │  │
+   322→   722→│  │   INSTITUTION NAME           │  │  ← y = 12%, serif 28-34pt Bold
+   323→   723→│  │   (校名/机构名)                │  │
+   324→   724→│  │                             │  │
+   325→   725→│  │   ━━━━━━━━━━━━━━━━━━━━  │  │  ← thick divider (2pt)
+   326→   726→│  │                             │  │
+   327→   727→│  │   DOCUMENT TYPE              │  │  ← y = 30%, 20-24pt
+   328→   728→│  │   (开题报告/毕业论文/申报书)    │  │
+   329→   729→│  │                             │  │
+   330→   730→│  │   TITLE                     │  │  ← y = 40%, serif 26-30pt Bold
+   331→   731→│  │   (论文题目)                   │  │    max 3 lines, centered
+   332→   732→│  │                             │  │
+   333→   733→│  │   Field: _______________    │  │  ← y = 58-78%, structured fields
+   334→   734→│  │   Field: _______________    │  │    left-label + underline value
+   335→   735→│  │   Field: _______________    │  │    e.g. 姓名、学号、导师、院系、日期
+   336→   736→│  │   Field: _______________    │  │
+   337→   737→│  │   Field: _______________    │  │
+   338→   738→│  │                             │  │
+   339→   739→│  │   DATE                      │  │  ← y = 88%, centered, 14pt
+   340→   740→│  │                             │  │
+   341→   741→│  └─────────────────────────────┘  │
+   342→   742→└─────────────────────────────────┘
+   343→   743→││ = 2.5pt black border, inset 5% from page edge
+   344→   744→```
+   345→   745→
+   346→   746→**Best for:** Thesis proposals (开题报告), dissertations, institutional reports, government documents, any formal submission with structured metadata fields
+   347→   747→
+   348→   748→**Content slots:**
+   349→   749→| Slot | Required | Example |
+   350→   750→|------|----------|---------|
+   351→   751→| `institution` | **Required** | "北京大学", "Massachusetts Institute of Technology" |
+   352→   752→| `doc_type` | Optional | "开题报告", "Thesis Proposal", "毕业设计" |
+   353→   753→| `title` | **Required** | Paper/document title (auto-wrap, max 3 lines) |
+   354→   754→| `fields` | Optional | Array of `{label, value}` pairs. Common: 姓名/Name, 学号/ID, 导师/Advisor, 院系/Department, 专业/Major |
+   355→   755→| `date` | Optional | "2026年4月", "April 2026" |
+   356→   756→
+   357→   757→**HTML structure:**
+   358→   758→```html
+   359→   759→<!DOCTYPE html>
+   360→   760→<html lang="zh">
+   361→   761→<head>
+   362→   762→  <meta charset="UTF-8">
+   363→   763→  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@300;400;500;700&family=Playfair+Display:wght@400;700;900&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+   364→   764→  <style>
+   365→   765→    @page { size: 794px 1123px; margin: 0; }
+   366→   766→    :root {
+   367→   767→      --c-bg: #ffffff;
+   368→   768→      --c-text: #1a1a1a;
+   369→   769→      --c-accent: #1a1a1a;
+   370→   770→      --c-muted: #4a4a4a;
+   371→   771→      --c-line: #333333;
+   372→   772→    }
+   373→   773→    html, body { margin: 0; padding: 0; width: 794px; height: 1123px; background: var(--c-bg); color: var(--c-text); font-family: 'Noto Sans SC', 'Inter', sans-serif; }
+   374→   774→    @media screen {
+   375→   775→      html { height: auto; display: flex; justify-content: center; min-height: 100vh; background: #e8e8e8; }
+   376→   776→      body { transform-origin: top center; scale: min(1, calc(100vw / 794), calc(100vh / 1123)); margin: 0 auto; box-shadow: 0 0 60px rgba(0,0,0,0.15); }
+   377→   777→    }
+   378→   778→    .cover {
+   379→   779→      width: 794px; height: 1123px; position: relative; box-sizing: border-box;
+   380→   780→    }
+   381→   781→    /* Black border frame - inset 5% from page edge */
+   382→   782→    .border-frame {
+   383→   783→      position: absolute;
+   384→   784→      top: 56px; left: 40px; right: 40px; bottom: 56px;
+   385→   785→      border: 2.5px solid var(--c-accent);
+   386→   786→      pointer-events: none;
+   387→   787→    }
+   388→   788→    /* Content area inside frame */
+   389→   789→    .content {
+   390→   790→      position: absolute;
+   391→   791→      top: 56px; left: 40px; right: 40px; bottom: 56px;
+   392→   792→      display: flex; flex-direction: column; align-items: center;
+   393→   793→      padding: 60px 50px;
+   394→   794→      box-sizing: border-box;
+   395→   795→    }
+   396→   796→    .institution {
+   397→   797→      font-size: 30pt; font-weight: 700; letter-spacing: 6px;
+   398→   798→      font-family: 'Noto Serif SC', 'Playfair Display', serif;
+   399→   799→      text-align: center; margin-bottom: 30px;
+   400→   800→      max-width: 580px;
+   401→   801→    }
+   402→   802→    .thick-divider {
+   403→   803→      width: 70%; height: 2px; background: var(--c-accent);
+   404→   804→      margin-bottom: 40px;
+   405→   805→    }
+   406→   806→    .doc-type {
+   407→   807→      font-size: 22pt; font-weight: 400; letter-spacing: 4px;
+   408→   808→      text-align: center; margin-bottom: 50px;
+   409→   809→      color: var(--c-text);
+   410→   810→    }
+   411→   811→    .title {
+   412→   812→      font-size: 26pt; font-weight: 700; line-height: 1.4;
+   413→   813→      font-family: 'Noto Serif SC', 'Playfair Display', serif;
+   414→   814→      text-align: center; margin-bottom: 60px;
+   415→   815→      max-width: 520px;
+   416→   816→    }
+   417→   817→    .fields-block {
+   418→   818→      width: 400px; margin-bottom: auto;
+   419→   819→    }
+   420→   820→    .field-row {
+   421→   821→      display: flex; align-items: baseline;
+   422→   822→      margin-bottom: 28px; font-size: 14pt;
+   423→   823→    }
+   424→   824→    .field-label {
+   425→   825→      white-space: nowrap; margin-right: 12px;
+   426→   826→      color: var(--c-text); font-weight: 400;
+   427→   827→      letter-spacing: 2px;
+   428→   828→    }
+   429→   829→    .field-value {
+   430→   830→      flex: 1; text-align: center;
+   431→   831→      border-bottom: 1px solid var(--c-line);
+   432→   832→      padding-bottom: 4px; min-height: 24px;
+   433→   833→      font-family: 'Noto Sans SC', 'Inter', sans-serif;
+   434→   834→    }
+   435→   835→    .date-block {
+   436→   836→      font-size: 14pt; color: var(--c-muted);
+   437→   837→      text-align: center; letter-spacing: 2px;
+   438→   838→      margin-top: auto; padding-top: 30px;
+   439→   839→    }
+   440→   840→  </style>
+   441→   841→</head>
+   442→   842→<body>
+   443→   843→  <div class="cover">
+   444→   844→    <div class="border-frame"></div>
+   445→   845→    <div class="content">
+   446→   846→      <div class="institution"><!-- INSTITUTION --></div>
+   447→   847→      <div class="thick-divider"></div>
+   448→   848→      <div class="doc-type"><!-- DOC_TYPE --></div>
+   449→   849→      <div class="title"><!-- TITLE --></div>
+   450→   850→      <div class="fields-block">
+   451→   851→        <div class="field-row">
+   452→   852→          <span class="field-label"><!-- LABEL_1 --></span>
+   453→   853→          <span class="field-value"><!-- VALUE_1 --></span>
+   454→   854→        </div>
+   455→   855→        <div class="field-row">
+   456→   856→          <span class="field-label"><!-- LABEL_2 --></span>
+   457→   857→          <span class="field-value"><!-- VALUE_2 --></span>
+   458→   858→        </div>
+   459→   859→        <div class="field-row">
+   460→   860→          <span class="field-label"><!-- LABEL_3 --></span>
+   461→   861→          <span class="field-value"><!-- VALUE_3 --></span>
+   462→   862→        </div>
+   463→   863→        <div class="field-row">
+   464→   864→          <span class="field-label"><!-- LABEL_4 --></span>
+   465→   865→          <span class="field-value"><!-- VALUE_4 --></span>
+   466→   866→        </div>
+   467→   867→        <div class="field-row">
+   468→   868→          <span class="field-label"><!-- LABEL_5 --></span>
+   469→   869→          <span class="field-value"><!-- VALUE_5 --></span>
+   470→   870→        </div>
+   471→   871→      </div>
+   472→   872→      <div class="date-block"><!-- DATE --></div>
+   473→   873→    </div>
+   474→   874→  </div>
+   475→   875→</body>
+   476→   876→</html>
+   477→   877→```
+   478→   878→
+   479→   879→**Layout rules:**
+   480→   880→1. **Border frame**: 2.5pt solid black, inset ~5% from all page edges (40px left/right, 56px top/bottom on A4 at 96dpi). This is the defining visual element.
+   481→   881→2. **Institution name**: Centered, serif, 28-34pt Bold, letter-spacing 4-6px. For CJK names, use wider letter-spacing (6px). For Latin names, use standard (3px).
+   482→   882→3. **Thick divider**: 2pt solid line, 70% width, separates institution from content below.
+   483→   883→4. **Document type**: 20-24pt, lighter weight than institution name, letter-spacing 3-4px. This slot differentiates document categories (e.g. "开题报告" / "Thesis Proposal" / "毕业论文" / "Graduation Design").
+   484→   884→5. **Title**: Serif, 26-30pt Bold, max 3 lines, centered. Auto-wrap at 520px width.
+   485→   885→6. **Structured fields**: Left-aligned label + centered underline value. Label width fixed by longest label in the set. 3-7 field rows supported. Common fields: Name/姓名, Student ID/学号, Advisor/导师, Department/院系, Major/专业.
+   486→   886→7. **Date**: Centered at bottom, 14pt, letter-spacing 2px.
+   487→   887→
+   488→   888→**Field auto-detection:**
+   489→   889→When the user provides structured metadata (name, student ID, advisor, etc.), auto-populate the fields block. When no fields are provided, omit the fields-block entirely and let the title expand vertically into the freed space.
+   490→   890→
+   491→   891→**Variant 06B - Double border:**
+   492→   892→For extra formality (government documents, official submissions), replace the single border with a double border (outer 2.5pt + inner 1pt, 6px gap):
+   493→   893→```css
+   494→   894→.border-frame {
+   495→   895→  border: 2.5px solid var(--c-accent);
+   496→   896→  outline: 1px solid var(--c-accent);
+   497→   897→  outline-offset: 6px;
+   498→   898→}
+   499→   899→```
+   500→   900→
+   501→   901→**This template has NO background decoration layer, NO watermarks, NO gradients.** The black frame + white space IS the design.
+   502→   902→
+   503→   903→---
+   504→   904→
+   505→   905→## Template 07: Crystal Blue - Deep Blue Night Sky with Luminous Accents
+   506→   906→
+   507→   907→**Design intent:** Crystalline, translucent deep blue with glowing accents. Dark cover transitions to light-blue body. The entire document lives in one blue hue family (~215°). Subtle radial glow hints create glass-like depth without being flashy.
+   508→   908→
+   509→   909→### Color System
+   510→   910→
+   511→   911→**Cover (dark):**
+   512→   912→| Role | Hex | Description |
+   513→   913→|------|-----|-------------|
+   514→   914→| Background | `#0a1628` | Deep blue night sky |
+   515→   915→| Accent line/label | `#4da8da` | Luminous bright blue |
+   516→   916→| Title text | `#e8f0f8` | Cool white with blue tint |
+   517→   917→| Muted text | `#7a9bb8` | Blue-gray |
+   518→   918→| Glow/sidebar | `#2d7ab3` | Mid-blue (gradient source) |
+   519→   919→
+   520→   920→**Body (light) — same hue family:**
+   521→   921→| Role | Cascade Tier | Hex | Usage |
+   522→   922→|------|-------------|-----|-------|
+   523→   923→| Page background | XL | `#f5f8fc` | Ultra-light blue-white |
+   524→   924→| Section background | XL | `#edf2f9` | Light blue-gray |
+   525→   925→| Card background | L | `#e4ecf5` | Soft blue card |
+   526→   926→| Table stripe | L | `#eef3fa` | Subtle blue row |
+   527→   927→| Table header | M | `#1a4a7a` | Deep blue (bridges to cover) |
+   528→   928→| Border | S | `#c0d0e2` | Blue-gray lines |
+   529→   929→| Accent | XS | `#2d7ab3` | = cover glow color |
+   530→   930→| Text primary | text | `#142840` | Deep blue-black (not pure black) |
+   531→   931→| Text muted | text | `#5a7a96` | Blue-gray secondary |
+   532→   932→
+   533→   933→### Layer 2 - Structure
+   534→   934→- **Rectangular frame:** A single continuous rectangular border, inset 60px from all edges (top/bottom = 80px). Stroke = **2px**, color = `#4da8da` (accent). This forms a clean luminous blue frame around the entire cover content area.
+   535→   935→  - Top edge: `Y = 80px`, from `X = 60px` to `X = W - 60px`
+   536→   936→  - Bottom edge: `Y = H - 80px`, from `X = 60px` to `X = W - 60px`
+   537→   937→  - Left edge: `X = 60px`, from `Y = 80px` to `Y = H - 80px`
+   538→   938→  - Right edge: `X = W - 60px`, from `Y = 80px` to `Y = H - 80px`
+   539→   939→- **Background glow (optional):** Two subtle `radial-gradient` circles (6-8% opacity) positioned at upper-left and lower-right. Creates depth without visible shapes.
+   540→   940→
+   541→   941→### Layer 3 - Content
+   542→   942→
+   543→   943→| Element | Position | Constraints |
+   544→   944→|---------|----------|-------------|
+   545→   945→| Kicker | `X = 90px`, `Y = 0.12*H` | 11pt, accent color (#4da8da), letter-spacing 5px, uppercase, font-weight 300 |
+   546→   946→| Hero Title | `X = 90px`, `Y = 0.21*H` | 50pt (CJK 55pt), weight 900, Noto Serif SC, cool white (#e8f0f8), subtle text-shadow with blue glow |
+   547→   947→| Summary | `X = 90px`, `Y = 0.45*H` | 15pt, line-height 1.7, muted (#7a9bb8), max-width 520px |
+   548→   948→| Organization | `X = 90px`, `Y = 0.64*H` | 18pt, cool white |
+   549→   949→| Date | `X = 90px`, `Y = H - 80px` | 10pt, muted, letter-spacing 3px |
+   550→   950→
+   551→   951→### Recommended Palette Generation
+   552→   952→
+   553→   953→```bash
+   554→   954→# For documents using this template, the palette is fixed (not auto-generated).
+   555→   955→# Copy the body palette values directly from the table above.
+   556→   956→# Cover colors are hardcoded in the template HTML.
+   557→   957→```
+   558→   958→
+   559→   959→### Best For
+   560→   960→Technology reports, data analysis, AI/ML research, fintech, SaaS product reports, anything that benefits from a modern, polished, slightly premium blue aesthetic.
+   561→   961→
+   562→   962→---
+   563→   963→
+   564→   964→### Academic Template Selection Guide
+   565→   965→
+   566→   966→| Scenario | Template | Rationale |
+   567→   967→|----------|----------|-----------|
+   568→   968→| arXiv preprint, technical report | **03** (Vertical Anchor) | Left-aligned, data-dense feel |
+   569→   969→| IEEE/ACM paper, English thesis | **04** (Symmetric) | Classic bilateral symmetry |
+   570→   970→| Chinese thesis, journal with keywords | **04** (Symmetric) | Classic symmetry + keyword support via subtitle/summary slots |
+   571→   971→| **Thesis proposal, institutional cover, government doc** | **06** (Institutional) | **White bg, black border frame, structured field slots** |
+   572→   972→| Light/formal academic (white bg) | **01** (HUD) | Use standard cover system |
+   573→   973→
+   574→   974→
+   575→   975→Covers support a **background decoration layer** rendered behind all foreground content (Layer 1). This layer adds subtle depth through supergraphics, typographic watermarks, and blueprint hairlines.
+   576→   976→
+   577→   977→See → `typesetting/cover-backgrounds.md` - complete specification with modules, recipes, and constraint matrix.
+   578→   978→
+   579→   979→**Quick reference:**
+   580→   980→- **Recipe A (Minimalist Modern)**: Deep-space arc only - safest, max whitespace
+   581→   981→- **Recipe B (Engineering Academic)**: Coordinate cross + vertical spine text - precision, engineering feel
+   582→   982→- **Recipe C (Stable & Authoritative)**: Angle slash + bottom bleed text - heavy, authoritative
+   583→   983→
+   584→   984→**Background layer is OPTIONAL.** Not every cover needs one. Template 01 already defines its own Layer 1 background - use the recipes only when a template's built-in background is insufficient.
+   585→   985→
+   586→   986→
