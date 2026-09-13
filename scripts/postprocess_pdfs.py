@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Post-process Smart Chat PDFs: page numbers (cover hidden, body starts at 1),
-metadata, and U+FFFD text scan. Per pdf skill pagination.md + content rules."""
+metadata, and U+FFFD text scan. Per pdf skill pagination.md + content rules.
+Usage: python3 postprocess_pdfs.py [name_filter]   e.g. AIGUIDE"""
+import sys
 import pymupdf
 
 DOCS = [
@@ -10,11 +12,18 @@ DOCS = [
     ("/home/z/my-project/download/docs/SmartChat-HANDOFF.pdf",
      "چت هوشمند — Project Handoff | سند تحویل پروژه",
      "Developer onboarding brief: quick start, critical gotchas, contract, verification checklist, task history, next steps"),
+    ("/home/z/my-project/download/docs/SmartChat-AIGUIDE.pdf",
+     "چت هوشمند — AI Development Guide | راهنمای توسعه هوش مصنوعی",
+     "AI layer reference: model catalog, upstream transport, universal SSE parser, OpenAI & Anthropic compatible API, keys, errors, playbook"),
 ]
 
 GRAY = (0x5A / 255, 0x7A / 255, 0x96 / 255)  # --c-muted, same blue family
 
+FILTER = sys.argv[1] if len(sys.argv) > 1 else None
+
 for path, title, subject in DOCS:
+    if FILTER and FILTER not in path:
+        continue
     doc = pymupdf.open(path)
     # 1) stamp page numbers: skip cover (page 0); body page k shows number k
     for i in range(1, doc.page_count):

@@ -177,3 +177,24 @@ Stage Summary:
 - تحویل‌دادنی‌ها: README.md و HANDOFF.md در ریشه پروژه + کپی در download/ · download/docs/{SmartChat-README.pdf (10 صفحه، 237KB)، SmartChat-HANDOFF.pdf (5 صفحه، 161KB)، هر دو HTML منبع، assets/fonts/4 وزن Vazirmatn}
 - کلیدهای واقعی طبق خواستهٔ کاربر داخل هر دو سند درج شد (openai + anthropic از api-keys.json)
 - known-issue ثابت: آپستریم رایگان گاهی 429 — در سند‌ها به‌عنوان رفتار سرویس مستند شد
+
+---
+Task ID: 9
+Agent: main (Z.ai Code)
+Task: ساخت راهنمای توسعه هوش مصنوعی (AI Development Guide) — MD + PDF دوزبانه هم‌خانواده با مستندات قبلی
+
+Work Log:
+- خواندن worklog (تسک ۸) + بررسی دقیق کد لایهٔ AI: models.ts، upstream.ts، sse.ts، v1.ts، apikeys.ts، هر سه route /v1، api/chat، و نقشهٔ خطی توابع AI در app.js (FM_MODELS:66، resolveModelId:83، openUpstream:2083، getBearerToken:2347، openaiError:2355، anthropicError:2367، flattenContent:2372، makeUpstreamParser:2399، collectUpstreamText:2520)
+- خواندن زنجیرهٔ مهارت pdf: SKILL.md → creative-flow.md → fonts.md → overflow.md (+ قالب تأییدشدهٔ HANDOFF به‌عنوان مرجع CSS)
+- نوشتن AI-GUIDE.md (ریشه + کپی در download/): ۱۱ بخش — دامنه، معماری چهارسطحی با دیاگرام، کاتالوگ ۷ مدل + resolveModelId + مراحل افزودن مدل، پارسر جهانی SSE و فرمت‌های پشتیبانی‌شده، مرجع کامل /v1/models و /v1/chat/completions (curl + Python SDK)، /v1/messages با چرخهٔ استریم Anthropic، قرارداد /api داخلی، کلیدها (با کلیدهای واقعی)، ماتریس خطاها، Playbook (اکستنشن جدید/تعویض آپستریم/شش curl آزمون/دیباگ) و نقشهٔ راه + مرجع سریع فایل‌ها + هم‌بستهٔ سندها
+- ساخت SmartChat-AIGUIDE.html با همان قالب Crystal Blue (کاور #0a1628 + بدنه روشن، Vazirmatn، RTL) + کلاس‌های جدید .flow (دیاگرام جریان) و .play (کارت‌های Playbook) و .tbl-flow (جدول قابل شکستن با هدر تکرارشونده)
+- اعتبارسنجی: poster_validate خطاهای FONT_NO_FALLBACK را روی خطوط @font-face داد (false positive — تعریف فونت، نه مصرف) و COVER_TEXT_OVERLAP هر ۱۱ مورد در y>1123 = زیرخط سکشن‌های بدنه (طراحی عمدی Flow، کاور پاک) — هم‌سنجه با تسک ۸
+- تبدیل با html2pdf-next.js --nopaged (۱۰ صفحه) + پس‌پردازش با postprocess_pdfs.py (که این بار پارامتر فیلتر AIGUIDE گرفت تا README/HANDOFF دوباره شماره نخورند): شماره صفحه، متادیتا، اسکن U+FFFD = 0
+- رفع دو مشکل پرکنندگی پس از اندازه‌گیری: صفحهٔ ۳ (۵۹٪ — جدول مدل‌ها رانده‌شده) با tbl-flow → ۹۳٪؛ صفحهٔ آخر (۱۰٪ — فقط جعبهٔ اختتام) با افزودن ۱۱.۱ مرجع سریع فایل‌ها و ۱۱.۲ هم‌بستهٔ سندها → ۶۵٪؛ بازسازی و اندازه‌گیری مجدد همهٔ صفحات ۶۵–۹۵٪
+- pdf_qa نهایی: ۱۱ چک پاس (متادیتا/فونت embed/سرریز صفر/full-bleed کاور/حاشیه متقارن/بدون صفحه خالی) + ۶ هشدار خط‌آغاز «—» = همان آرتیفکت استخراج bidi RTL (غیرمسدودکننده)؛ بازبینی بصری PNG صفحات ۱/۳/۶/۱۰: شکل‌دهی فارسی، جدول‌ها، بلوک‌های کد LTR و دیاگرام همه سالم
+- همگام‌سازی: جدول‌های ۱۱.۱ و ۱۱.۲ به AI-GUIDE.md (ریشه + download/) هم اضافه شد
+
+Stage Summary:
+- تحویل‌دادنی‌ها: AI-GUIDE.md (ریشه پروژه + download/) · download/docs/SmartChat-AIGUIDE.html (منبع) · SmartChat-AIGUIDE.pdf (۱۰ صفحه، ~281KB، برداری، Vazirmatn embed، شماره صفحه + متادیتا)
+- سند چهارم مجموعهٔ مستندات پروژه شد (README / HANDOFF / AI-GUIDE / worklog)؛ کلیدهای واقعی API طبق الگوی اسناد قبلی درج شد
+- known-issue ثابت: هشدارهای bidi استخراج متن RTL در pdf_qa غیرمسدودکننده‌اند (تأیید بصری)

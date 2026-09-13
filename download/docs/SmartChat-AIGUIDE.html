@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>چت هوشمند — AI Development Guide</title>
+<style>
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Regular.ttf') format('truetype');font-weight:400;font-display:swap;}
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Medium.ttf') format('truetype');font-weight:500;font-display:swap;}
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Bold.ttf') format('truetype');font-weight:700;font-display:swap;}
+@font-face{font-family:'Vazirmatn';src:url('assets/fonts/Vazirmatn-Black.ttf') format('truetype');font-weight:900;font-display:swap;}
+@page{size:794px 1123px;margin:0;}
+:root{
+  --c-cover-bg:#0a1628; --c-accent:#4da8da; --c-glow:#2d7ab3;
+  --c-page:#f5f8fc; --c-section:#edf2f9; --c-card:#e4ecf5; --c-stripe:#eef3fa;
+  --c-thead:#1a4a7a; --c-border:#c0d0e2; --c-accent2:#2d7ab3;
+  --c-text:#142840; --c-muted:#5a7a96; --c-cover-text:#e8f0f8; --c-cover-muted:#7a9bb8;
+  --c-code-bg:#142840; --c-code-text:#dbe9f6;
+}
+html,body{margin:0;padding:0;width:794px;background:var(--c-cover-bg);color:var(--c-text);font-family:'Vazirmatn','DejaVu Sans',sans-serif;}
+@media screen{html{height:auto;display:flex;justify-content:center;background:var(--c-cover-bg);}body{margin:20px auto;box-shadow:0 0 60px rgba(0,0,0,.45);}}
+body{line-break:strict;word-break:normal;overflow-wrap:break-word;}
+p,td,li{line-break:strict;}
+p{text-align:justify;margin:0 0 10px;font-size:13.5px;line-height:1.95;}
+/* ---------- Cover ---------- */
+.cover{width:794px;height:1123px;position:relative;background:radial-gradient(circle at 12% 8%,rgba(45,122,179,.15) 0%,rgba(45,122,179,0) 34%),radial-gradient(circle at 88% 94%,rgba(45,122,179,.13) 0%,rgba(45,122,179,0) 38%),var(--c-cover-bg);color:var(--c-cover-text);break-after:page;}
+.cover .frame{position:absolute;top:80px;bottom:80px;left:60px;right:60px;border:2px solid var(--c-accent);}
+.cover .inner{position:absolute;top:80px;bottom:80px;left:60px;right:60px;padding:46px 50px;display:flex;flex-direction:column;box-sizing:border-box;}
+.cv-kicker{font-size:11px;font-weight:500;letter-spacing:5px;color:var(--c-accent);text-transform:uppercase;direction:ltr;text-align:left;}
+.cv-hero{margin-top:110px;font-size:46px;font-weight:900;line-height:1.18;color:var(--c-cover-text);text-shadow:0 0 24px rgba(77,168,218,.25);}
+.cv-hero-en{margin-top:10px;font-size:24px;font-weight:700;letter-spacing:2px;color:var(--c-accent);direction:ltr;text-align:right;}
+.cv-sub{margin-top:26px;font-size:16px;font-weight:500;color:var(--c-cover-text);opacity:.9;line-height:1.7;}
+.cv-summary{margin-top:22px;font-size:13.5px;line-height:1.9;color:var(--c-cover-muted);max-width:540px;text-align:justify;}
+.cv-meta{margin-top:auto;display:flex;gap:10px;flex-wrap:wrap;max-width:100%;}
+.cv-chip{border:1px solid rgba(77,168,218,.45);color:var(--c-cover-text);font-size:11px;padding:6px 14px;border-radius:999px;letter-spacing:.5px;}
+.cv-footer{margin-top:26px;display:flex;justify-content:space-between;font-size:10px;letter-spacing:3px;color:var(--c-cover-muted);text-transform:uppercase;direction:ltr;}
+/* ---------- Body layout ---------- */
+.main-content{background:var(--c-page);padding:56px 58px 46px 58px;}
+.chapter-header{break-after:avoid;break-inside:avoid;margin-top:26px;margin-bottom:14px;}
+.chapter-header:first-child{margin-top:0;}
+.sec-tag{font-size:10px;font-weight:700;letter-spacing:4px;color:var(--c-accent2);text-transform:uppercase;direction:ltr;text-align:right;}
+.sec-title{font-size:21px;font-weight:900;color:var(--c-text);margin-top:4px;line-height:1.35;}
+.divider{width:64px;height:3px;background:var(--c-accent2);border-radius:2px;margin-top:8px;}
+h3{font-size:14.5px;font-weight:700;color:var(--c-text);margin:16px 0 8px;break-after:avoid;}
+ul{margin:4px 0 10px;padding-right:20px;}
+li{font-size:13px;line-height:1.9;margin-bottom:4px;text-align:justify;}
+strong{font-weight:700;}
+.note{background:var(--c-card);border-right:3px solid var(--c-accent2);border-radius:8px;padding:10px 14px;font-size:12.5px;line-height:1.85;margin:10px 0;break-inside:avoid;color:var(--c-text);}
+code.ic{direction:ltr;unicode-bidi:embed;font-family:'DejaVu Sans Mono',monospace;font-size:.86em;background:var(--c-card);border:1px solid var(--c-border);border-radius:4px;padding:0 5px;color:var(--c-thead);}
+pre.code{direction:ltr;text-align:left;font-family:'DejaVu Sans Mono',monospace;font-size:10.3px;line-height:1.62;background:var(--c-code-bg);color:var(--c-code-text);border-radius:9px;padding:13px 16px;margin:10px 0;white-space:pre-wrap;overflow-wrap:anywhere;break-inside:avoid;}
+table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0;break-inside:avoid;}
+table.tbl-flow{break-inside:auto;}
+thead{display:table-header-group;}
+tr{break-inside:avoid;}
+th{background:var(--c-thead);color:#ffffff;font-weight:700;padding:8px 10px;text-align:right;font-size:12px;}
+td{border:1px solid var(--c-border);padding:7px 10px;text-align:right;vertical-align:top;line-height:1.7;}
+tbody tr:nth-child(even) td{background:var(--c-stripe);}
+td .ltr, .ltr{direction:ltr;unicode-bidi:embed;}
+td code, td .mono{direction:ltr;unicode-bidi:embed;font-family:'DejaVu Sans Mono',monospace;font-size:11px;}
+/* ---------- Playbook cards ---------- */
+.play{background:#ffffff;border:1px solid var(--c-border);border-right:3px solid var(--c-accent2);border-radius:10px;padding:12px 16px;margin-bottom:12px;break-inside:avoid;}
+.play .p-t{font-size:13.5px;font-weight:700;color:var(--c-thead);}
+.play .p-n{display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:50%;background:var(--c-thead);color:#fff;font-size:12px;font-weight:700;margin-left:8px;}
+.play p{margin:6px 0 0;font-size:12.8px;}
+.play ol{margin:6px 18px 0 0;padding:0;}
+.play ol li{font-size:12.8px;margin-bottom:5px;}
+/* ---------- Architecture flow diagram ---------- */
+.flow{background:#ffffff;border:1px solid var(--c-border);border-radius:12px;padding:16px 18px 14px;margin:10px 0;break-inside:avoid;direction:ltr;}
+.flow .frow{display:flex;align-items:stretch;gap:10px;max-width:100%;}
+.flow .fbox{flex:1 1 auto;min-width:80px;max-width:100%;border:1.5px solid var(--c-accent2);border-radius:8px;padding:8px 10px;background:var(--c-section);text-align:center;}
+.flow .fbox .f-t{font-size:12px;font-weight:700;color:var(--c-thead);direction:rtl;}
+.flow .fbox .f-d{font-size:10px;color:var(--c-muted);margin-top:2px;direction:rtl;line-height:1.6;}
+.flow .fnum{flex:0 0 auto;display:flex;align-items:center;font-size:11px;font-weight:700;color:var(--c-accent2);}
+.flow .farr{text-align:center;font-size:14px;color:var(--c-accent2);line-height:1.35;margin:2px 0;}
+.flow .fcap{text-align:center;font-size:10.5px;color:var(--c-muted);margin-top:8px;direction:rtl;}
+/* ---------- Two-col stat grid ---------- */
+.grid2{display:flex;flex-wrap:wrap;gap:12px;margin:10px 0;max-width:100%;}
+.gcard{flex:1 1 46%;min-width:260px;max-width:100%;background:#ffffff;border:1px solid var(--c-border);border-radius:10px;padding:12px 16px;break-inside:avoid;box-sizing:border-box;}
+.gcard .g-t{font-size:13px;font-weight:700;color:var(--c-thead);margin-bottom:4px;}
+.gcard .g-v{font-size:11.5px;font-family:'DejaVu Sans Mono',monospace;direction:ltr;unicode-bidi:embed;color:var(--c-text);background:var(--c-section);border-radius:5px;padding:4px 8px;display:block;margin-top:4px;overflow-wrap:anywhere;}
+.gcard .g-d{font-size:11.8px;color:var(--c-muted);margin-top:6px;line-height:1.75;text-align:justify;}
+.closing{margin-top:22px;background:var(--c-cover-bg);color:var(--c-cover-muted);border-radius:12px;padding:20px 24px;break-inside:avoid;}
+.closing .en{font-size:10px;letter-spacing:3px;color:var(--c-accent);text-transform:uppercase;direction:ltr;text-align:left;}
+.closing .fa{font-size:12.5px;line-height:1.9;margin-top:8px;text-align:justify;}
+.closing .fa b{color:var(--c-cover-text);}
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<div class="cover">
+  <div class="frame"></div>
+  <div class="inner">
+    <div class="cv-kicker">AI DEVELOPMENT GUIDE · LLM INTEGRATION &amp; API COMPATIBILITY LAYER</div>
+    <div class="cv-hero">راهنمای توسعهٔ هوش مصنوعی</div>
+    <div class="cv-hero-en">AI DEVELOPMENT GUIDE</div>
+    <div class="cv-sub">مرجع لایهٔ هوش مصنوعی پروژهٔ چت هوشمند — Smart Chat<br>مدل‌ها، آپستریم، استریم SSE و API سازگار OpenAI / Anthropic</div>
+    <div class="cv-summary">این سند هر آن‌چه بین کاربر و مدل‌های زبانی اتفاق می‌افتد را مستند می‌کند: معماری چهارلایه از کلاینت تا آپستریم freemodels، کاتالوگ هفت مدل و قواعد نرمال‌سازی نام مدل، پارسر جهانی SSE، مرجع کامل اندپوینت‌های سازگار OpenAI و Anthropic با نمونه‌های curl و Python، مدیریت کلید، ماتریس خطاها و کتاب راهنمای توسعه برای افزودن مدل و اکستنشن جدید. مخاطب آن توسعه‌دهنده‌ها و مصرف‌کننده‌های API این پروژه‌اند.</div>
+    <div class="cv-meta">
+      <span class="cv-chip">نسخهٔ سند ۱.۰</span>
+      <span class="cv-chip">۱۴ سپتامبر ۲۰۲۶ · ۲۳ شهریور ۱۴۰۵</span>
+      <span class="cv-chip">۷ مدل · ۳ اندپوینت /v1</span>
+      <span class="cv-chip">Next.js 16 + app.js</span>
+    </div>
+    <div class="cv-footer"><span>SMART CHAT · AI GUIDE V1.0</span><span>FREEMODELS-POWERED</span></div>
+  </div>
+</div>
+
+<!-- ================= BODY ================= -->
+<div class="main-content">
+
+  <!-- 1 Overview -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 01</div>
+    <div class="sec-title">معرفی و دامنه | Overview &amp; Scope</div>
+    <div class="divider"></div>
+  </div>
+  <p>این سند مرجع عملیاتی «لایهٔ هوش مصنوعی» پروژه است: هر آن‌چه بین کاربر و مدل‌های زبانی اتفاق می‌افتد. دامنهٔ آن چهار زیرسیستم را پوشش می‌دهد: <b>(۱) کاتالوگ مدل‌ها</b> و نرمال‌سازی نام مدل، <b>(۲) انتقال به آپستریم</b> freemodels با جعل هدرهای مرورگر، <b>(۳) استریم SSE</b> و پارسر جهانی پاسخ، و <b>(۴) لایهٔ سازگاری API</b> با دو استاندارد OpenAI و Anthropic. آن‌چه در دامنه نیست — نصب و اجرا، UI چت، پیکر مدل گروهی و تاریخچهٔ تسک‌ها — در <code class="ic">README.md</code> و <code class="ic">HANDOFF.md</code> پوشش داده شده است.</p>
+  <p>راهنما از دو منظر نوشته شده است. منظر نخست «مصرف‌کنندهٔ API» است: کسی که با curl یا SDK رسمی OpenAI/Anthropic به اندپوینت‌های <code class="ic">/v1</code> وصل می‌شود و فقط قرارداد درست درخواست/پاسخ لازم دارد (بخش‌های ۵ تا ۹). منظر دوم «توسعه‌دهندهٔ پروژه» است: کسی که می‌خواهد مدل اضافه کند، فیلد اکستنشن بسازد، رفتار استریم را عوض کند یا آپستریم را تعویض کند (بخش‌های ۲ تا ۴ و ۱۰). هر دو منظر روی یک واقعیت مشترک تکیه دارند: پروژه به سرویس رایگان freemodels متصل است و همهٔ تصمیم‌های طراحی — از جعل هدر تا پارسر جهانی — نتیجهٔ همین محدودیت‌اند.</p>
+  <div class="note"><b>قانون طلایی:</b> هر قابلیت در دو نسخهٔ پروژه (Next.js در <span class="mono">src/</span> و تک‌فایل <span class="mono">app.js</span>) باید همگام بماند؛ هر جا فایلی از <span class="mono">src/lib</span> معرفی می‌شود، معادل خطی آن در app.js هم ذکر شده است.</div>
+
+  <!-- 2 Architecture -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 02</div>
+    <div class="sec-title">معماری لایهٔ هوش مصنوعی | AI Layer Architecture</div>
+    <div class="divider"></div>
+  </div>
+  <p>جریان یک درخواست چت از لحظهٔ خروج از کلاینت تا بازگشت اولین توکن از چهار لایهٔ مجزا عبور می‌کند. این جداسازی عمدی است: هر لایه مستقل تست و تعویض می‌شود و باگ هر لایه در مرزی مشخص منتسب می‌شود. کد لایه‌ها پراکنده نیست — لایهٔ پروتکل در <code class="ic">route.ts</code>ها، لایهٔ انتقال در <code class="ic">upstream.ts</code> و پارس در <code class="ic">sse.ts</code> زندگی می‌کند.</p>
+  <div class="flow">
+    <div class="frow"><div class="fbox"><div class="f-t">کلاینت — UI چت / SDK</div><div class="f-d">POST /api/chat یا /v1/*</div></div><div class="fnum">①</div><div class="fbox"><div class="f-t">لایهٔ پروتکل — route.ts</div><div class="f-d">auth + اعتبارسنجی ورودی + شکل‌دهی پاسخ مقصد</div></div></div>
+    <div class="farr">▼</div>
+    <div class="frow"><div class="fbox"><div class="f-t">لایهٔ انتقال — upstream.ts</div><div class="f-d">node:https + هدرهای جعلی مرورگر · تایم‌اوت ۱۸۰s</div></div><div class="fnum">②③</div><div class="fbox"><div class="f-t">آپستریم freemodels</div><div class="f-d">workers.dev — SSE سبک OpenAI برمی‌گرداند</div></div></div>
+    <div class="farr">▼</div>
+    <div class="frow"><div class="fbox"><div class="f-t">پارسر جهانی — sse.ts</div><div class="f-d">استخراج text / reasoning از هر فرمت شناخته‌شده</div></div><div class="fnum">④</div><div class="fbox"><div class="f-t">بازنشر در فرمت مقصد</div><div class="f-d">SSE OpenAI / چرخهٔ Anthropic / عبور خام</div></div></div>
+    <div class="fcap">جریان درخواست: ① درخواست کلاینت → ② اعتبارسنجی و نرمال‌سازی → ③ ارسال با هدرهای جعلی → ④ پارس و بازنشر استریم</div>
+  </div>
+  <p><b>لایهٔ انتقال</b> (<code class="ic">src/lib/upstream.ts</code> · معادل <code class="ic">openUpstream</code> در <code class="ic">app.js:2083</code>) تنها نقطهٔ تماس با دنیای بیرون است و سه ثابت آن قراردادهای سخت‌گیرانه‌ای هستند که نباید بی‌فکر تغییر کنند:</p>
+  <div class="grid2">
+    <div class="gcard"><div class="g-t">آدرس آپستریم</div><span class="g-v">UPSTREAM_URL = freemodels-chat.freemodels.workers.dev</span><div class="g-d">تنها اندپوینت چت سرویس؛ اگر روزی عوض شد هر دو نسخه را هم‌زمان تغییر بدهید.</div></div>
+    <div class="gcard"><div class="g-t">سقف بدنهٔ درخواست</div><span class="g-v">MAX_BODY_BYTES = 5MB → 413</span><div class="g-d">تاریخچه‌های خیلی بلند باید قبل از ارسال کوتاه شوند؛ خطا شفاف 413 برمی‌گردد.</div></div>
+    <div class="gcard"><div class="g-t">تایم‌اوت پاسخ</div><span class="g-v">UPSTREAM_TIMEOUT_MS = 180_000</span><div class="g-d">۱۸۰ ثانیه برای پوشش تفکر طولانی مدل‌ها؛ بیشتر ← 504.</div></div>
+    <div class="gcard"><div class="g-t">هدرهای جعلی</div><span class="g-v">Origin / Referer = freemodels.pro</span><div class="g-d">+ UA کروم ۱۵۲، sec-ch-ua*، sec-fetch-* و Accept-Encoding: identity (پاسخ بدون فشرده‌سازی تا pipe مستقیم).</div></div>
+  </div>
+  <p><b>چرا <code class="ic">node:https</code> و نه <code class="ic">fetch</code>؟</b> آپستریم فقط به درخواست‌هایی که از دامنهٔ <code class="ic">freemodels.pro</code> آمده باشند پاسخ می‌دهد و این را از هدرهای <code class="ic">Origin</code> و <code class="ic">Referer</code> تشخیص می‌دهد. مشخصات fetch ارسال این دو هدر را ممنوع کرده است، در حالی که node:https آزادانه اجازه می‌دهد. <b>سه خط قرمز این لایه:</b> اول، پاسخ آپستریم هرگز نباید در سرور بافر شود — تکه‌به‌تکه با <code class="ic">Cache-Control: no-cache, no-transform</code> و <code class="ic">X-Accel-Buffering: no</code> عبور کند وگرنه استریم زنده می‌میرد. دوم، قطع کلاینت باید بلافاصله آپستریم را destroy کند (Next از طریق req.signal، app.js از رویداد close سوکت) — نشتی اتصال ممنوع. سوم، هدرهای access-control-* و transfer-encoding و content-encoding آپستریم قبل از عبور حذف می‌شوند تا پاسخ تمیز بماند.</p>
+
+  <!-- 3 Models -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 03</div>
+    <div class="sec-title">کاتالوگ مدل‌ها و انتخاب مدل | Model Catalog &amp; Selection</div>
+    <div class="divider"></div>
+  </div>
+  <h3>۳.۱ جدول مدل‌ها</h3>
+  <p>مدل‌ها در یک <b>منبع واحد</b> تعریف می‌شوند — <code class="ic">FM_MODELS</code> در <code class="ic">src/lib/models.ts</code> و همان ثابت در <code class="ic">app.js:66</code> — و پیکر مدل، دیتالیست و هر سه اندپوینت /v1 از همین منبع می‌خوانند. هیچ لیست موازی‌ای در فایل دیگری وجود ندارد و نباید ساخته شود.</p>
+  <table class="tbl-flow">
+    <thead><tr><th style="width:26%">Model ID</th><th style="width:24%">نام نمایشی</th><th style="width:18%">سازنده</th><th style="width:16%">گروه پیکر</th><th>نقش پیشنهادی</th></tr></thead>
+    <tbody>
+      <tr><td><code>claude-fable-5.1</code></td><td>Claude Fable 5.1</td><td>Anthropic</td><td>Claude Pro</td><td><b>پیش‌فرض</b> — تعادل کیفیت برای کار عمومی</td></tr>
+      <tr><td><code>claude-sonnet-5</code></td><td>Claude Sonnet 5</td><td>Anthropic</td><td>Claude Pro</td><td>کدنویسی و استدلال ساخت‌یافته</td></tr>
+      <tr><td><code>claude-fable-5</code></td><td>Claude Fable 5</td><td>Anthropic</td><td>Claude Pro</td><td>نگارش خلاق و روایت</td></tr>
+      <tr><td><code>gpt-5.6-sol</code></td><td>GPT 5.6 Sol</td><td>OpenAI</td><td>ChatGPT Pro</td><td>پاسخ سریع و محاوره‌ای</td></tr>
+      <tr><td><code>gpt-5.6-terra</code></td><td>GPT 5.6 Terra</td><td>OpenAI</td><td>ChatGPT Pro</td><td>تحلیل چندمرحله‌ای و داده</td></tr>
+      <tr><td><code>glm-5.2</code></td><td>GLM 5.2</td><td>Z.AI</td><td>Other Pro Models</td><td>چندزبانه و کار سبک</td></tr>
+      <tr><td><code>kimi-k3</code></td><td>Kimi K3</td><td>Moonshot AI</td><td>Other Pro Models</td><td>متون بلند و جمع‌بندی</td></tr>
+    </tbody>
+  </table>
+  <h3>۳.۲ نرمال‌سازی نام مدل (resolveModelId)</h3>
+  <p>تابع <code class="ic">resolveModelId</code> در <code class="ic">src/lib/models.ts</code> (معادل <code class="ic">app.js:83</code>) ورودی را نرم تطبیق می‌دهد: ابتدا trim و lowercase، سپس فاصله‌ها و زیرخط‌ها به خط تیره (<code class="ic">/[\s_]+/ → "-"</code>)، بعد جست‌وجو در id ها و نام‌های نمایشی. نتیجه: «Claude Fable 5.1» و «claude_fable 5.1» و «claude-fable-5.1» هر سه به <code class="ic">claude-fable-5.1</code> می‌رسند. ورودی خالی ← مدل پیش‌فرض؛ ورودی ناشناخته دست‌نخورده عبور می‌کند — تصمیم عمدی: کلاینت‌هایی که نام مدل سفارشی می‌فرستند نباید 400 بگیرند، آپستریم خودش واکنش نشان می‌دهد.</p>
+  <h3>۳.۳ افزودن مدل جدید (خلاصهٔ Playbook)</h3>
+  <p>مسیر کامل در بخش ۱۰ آمده؛ خلاصهٔ پنج‌مرحله‌ای: رکورد <code class="ic">{id, name, vendor, group}</code> را در <code class="ic">models.ts</code> و دقیقاً همان را در <code class="ic">FM_MODELS</code> app.js اضافه کنید؛ لوگو را در <code class="ic">public/</code> بگذارید و با <code class="ic">scripts/embed_logos.py</code> در <code class="ic">EMBEDDED_LOGOS</code> (app.js:79) تزریق کنید؛ اگر گروه جدید است آیکن و برچسب گروه را در پیکر هر دو نسخه بسازید؛ با <code class="ic">GET /v1/models</code> و یک چت آزمایشی صحت‌سنجی کنید؛ و جدول مدل‌ها در این سند و README را به‌روز کنید — سندها جزو تعریف مدل‌اند، نه ضمیمه.</p>
+
+  <!-- 4 SSE -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 04</div>
+    <div class="sec-title">استریم و پارسر جهانی SSE | Streaming &amp; the Universal SSE Parser</div>
+    <div class="divider"></div>
+  </div>
+  <h3>۴.۱ چرا پارسر «جهانی»؟</h3>
+  <p>آپستریم رایگان است و هیچ SLA فرمت ندارد؛ در عمل سبک غالبش OpenAI است اما بسته به مدل فیلدها متفاوت می‌آیند. به همین دلیل <code class="ic">createSseParser</code> در <code class="ic">src/lib/sse.ts</code> طراحی شده که «هر شکلی که آپستریم بگوید» را به یک قرارداد داخلی ساده تبدیل کند: رویداد <code class="ic">{text, reasoning, error?}</code>. همهٔ مصرف‌کننده‌ها — UI چت، اندپوینت OpenAI، اندپوینت Anthropic — فقط این قرارداد را می‌بینند و از جزئیات آپستریم بی‌خبرند. اگر روزی آپستریم فرمتش را عوض کند، اولین و معمولاً تنها جای تغییر همین فایل است (معادل سرور در app.js: <code class="ic">makeUpstreamParser</code> خط ۲۳۹۹).</p>
+  <h3>۴.۲ فرمت‌های پشتیبانی‌شده</h3>
+  <table>
+    <thead><tr><th style="width:30%">الگو</th><th>نمونه / رفتار</th></tr></thead>
+    <tbody>
+      <tr><td>سبک OpenAI (delta)</td><td><span class="mono">choices[0].delta.{content,text}</span> + فیلدهای تفکر <span class="mono">reasoning_content / reasoning / thinking</span></td></tr>
+      <tr><td>سبک OpenAI (غیراستریم)</td><td><span class="mono">choices[0].message.{content,text,…}</span> به همان قواعد</td></tr>
+      <tr><td>سبک Claude</td><td><span class="mono">type:"content_block_delta"</span> با <span class="mono">delta.text / delta.thinking</span></td></tr>
+      <tr><td>فیلد مستقیم ریشه</td><td><span class="mono">{content}</span> یا <span class="mono">{text}</span> یا <span class="mono">{reasoning_content}</span></td></tr>
+      <tr><td>آبجکت خام / رشتهٔ خام</td><td>بدون پیشوند <span class="mono">data:</span> هم پارس می‌شود؛ رشتهٔ غیر JSON مستقیم به متن چسبانده می‌شود</td></tr>
+      <tr><td>متادیتای SSE</td><td><span class="mono">[DONE]</span> پایان استریم؛ <span class="mono">event:/id:/retry:</span> نادیده؛ خط <span class="mono">:</span> کامنت (مثل ping) رد می‌شود</td></tr>
+      <tr><td>خطای داخل استریم</td><td>آبجکت دارای <span class="mono">error</span> به‌صورت رویداد خطا منتشر می‌شود نه کرش</td></tr>
+    </tbody>
+  </table>
+  <h3>۴.۳ جزئیات پیاده‌سازی که باید بدانید</h3>
+  <p>پارسر خط‌به‌خط کار می‌کند و دو بافر دارد: <code class="ic">buf</code> برای خطوط ناقص (تکه‌های شبکه با مرز دلخواه می‌آیند) و <code class="ic">pendingJson</code> برای JSON چندخطیِ ناقص — تا وقتی JSON.parse موفق نشود payload جمع می‌شود. اگر در پایان استریم JSON ناتمامی بماند، به‌صورت خام منتشر می‌شود و هیچ داده‌ای دور ریخته نمی‌شود. این طراحی یعنی پارسر هرگز منتظر «چانک کامل» نمی‌ماند و تأخیر صفر دارد — شرط لازم برای کرسر زندهٔ UI.</p>
+  <p>دو ابزار سروری روی همین پارسر سوارند: <code class="ic">collectUpstreamText</code> (<code class="ic">app.js:2520</code>) کل استریم را به متن کامل جمع می‌کند (برای پاسخ‌های غیراستریم /v1) و در نسخهٔ Next همین کار در مسیر غیراستریم با <code class="ic">parser.feed(full)</code> + <code class="ic">parser.end()</code> انجام می‌شود. فیلد reasoning جدا از text منتشر می‌شود تا UI باکس «💭 فرایند تفکر مدل» را بسازد و اندپوینت Anthropic بلوک thinking مستقل تولید کند.</p>
+
+  <!-- 5 OpenAI API -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 05</div>
+    <div class="sec-title">اندپوینت‌های سازگار OpenAI | OpenAI-Compatible API</div>
+    <div class="divider"></div>
+  </div>
+  <h3>۵.۱ احراز هویت و لیست مدل‌ها</h3>
+  <pre class="code">Authorization: Bearer &lt;key&gt;        # هر دو کلید (sk-… و sk-ant-…) پذیرفته می‌شود
+# کلید نامعتبر ← 401 با error.code = "invalid_api_key"
+
+curl -s http://localhost:3000/v1/models \
+  -H "Authorization: Bearer sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50"
+# ← لیست استاندارد OpenAI با ۷ مدل · owned_by = freemodels-anthropic|openai|z.ai|moonshot-ai
+# بدون کلید ← 401</pre>
+  <h3>۵.۲ POST /v1/chat/completions</h3>
+  <pre class="code">curl -sN http://localhost:3000/v1/chat/completions \
+  -H "Authorization: Bearer sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-fable-5.1",
+    "messages": [{"role": "user", "content": "سلام! یک شعر کوتاه بگو"}],
+    "stream": true,
+    "thinking": false,          // اکستنشن غیراستاندارد (اختیاری)
+    "deep_search": false        // اکستنشن غیراستاندارد (اختیاری)
+  }'</pre>
+  <p><b>قواعد ورودی:</b> <code class="ic">messages</code> اجباری و باید غیرخالی باشد (400). نقش‌های <code class="ic">assistant</code>/<code class="ic">system</code> عیناً عبور می‌کنند و هر نقش ناشناخته به <code class="ic">user</code> نگاشت می‌شود (رفتار نرم). محتوای رشته‌ای یا آرایهٔ بلوکی هر دو پذیرفته است (<code class="ic">flattenContent</code> بلوک‌ها را به متن ساده می‌کاهد — معادل app.js:2372). نام مدل با resolveModelId نرمال می‌شود.</p>
+  <p><b>مسیر غیراستریم:</b> پاسخ استاندارد <code class="ic">chat.completion</code> با <code class="ic">finish_reason:"stop"</code> و usage تخمینی — هر ~۴ نویسه = ۱ توکن (آپستریم شمارندهٔ واقعی نمی‌دهد؛ <code class="ic">estTokens</code> در <code class="ic">v1.ts</code>). <b>مسیر استریم:</b> توالی <code class="ic">chat.completion.chunk</code> — چانک اول <code class="ic">delta:{role:"assistant",content:""}</code>؛ متن در <code class="ic">delta.content</code>؛ تفکر در <code class="ic">delta.reasoning_content</code> (همان فیلدی که SDK ها reasoning می‌شناسند)؛ چانک پایانی <code class="ic">finish_reason:"stop"</code>؛ با <code class="ic">stream_options.include_usage=true</code> یک چانک usage دار قبل از <code class="ic">data: [DONE]</code> می‌آید. قطع کلاینت وسط استریم ← آپستریم بلافاصله destroy می‌شود تا سهمیه هدر نرود.</p>
+  <pre class="code"># Python — SDK رسمی OpenAI
+from openai import OpenAI
+client = OpenAI(base_url="http://localhost:3000/v1",
+                api_key="sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50")
+stream = client.chat.completions.create(
+    model="claude-fable-5.1",
+    messages=[{"role": "user", "content": "سلام!"}],
+    stream=True,
+)
+for chunk in stream:
+    delta = chunk.choices[0].delta
+    if delta.content:
+        print(delta.content, end="", flush=True)</pre>
+
+  <!-- 6 Anthropic API -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 06</div>
+    <div class="sec-title">اندپوینت سازگار Anthropic | Anthropic-Compatible API</div>
+    <div class="divider"></div>
+  </div>
+  <h3>۶.۱ POST /v1/messages — قواعد ورودی</h3>
+  <pre class="code">x-api-key: &lt;key&gt;                   # هدر Bearer هم به‌عنوان جایگزین پذیرفته می‌شود
+anthropic-version: اختیاری است (اعتبارسنجی نمی‌شود)
+
+curl -sN http://localhost:3000/v1/messages \
+  -H "x-api-key: sk-ant-api03-9lamB2K7KoYT8fw8tAp2CKL5kKsOHKhN4mE9eawuzRuW0aU3umJirsEFbS3B6RCjLRw8lrJ0YRmsnxECIu3nHaKM" \
+  -H "content-type: application/json" \
+  -d '{"model": "claude-fable-5.1", "max_tokens": 1024, "stream": true,
+       "messages": [{"role": "user", "content": "خلاصهٔ معماری پروژه را بده"}]}'</pre>
+  <p>این اندپوینت <b>سخت‌گیرانه</b> مطابق قوانین خود Anthropic است: <code class="ic">model</code> و <code class="ic">max_tokens</code> اجباری‌اند و نبودشان ← 400 با پیام عیناً <code class="ic">model: Field required</code> / <code class="ic">max_tokens: Field required</code> — SDK ها و ابزارهای رسمی به این خطاها تکیه دارند؛ این رفتار را شل نکنید (نکتهٔ بحرانی شمارهٔ ۱۰ در HANDOFF). فیلد <code class="ic">system</code> رشتهٔ ساده یا آرایهٔ بلوک می‌پذیرد (به متن تبدیل و به‌عنوان پیام system به آپستریم می‌رود). نقش‌ها فقط user/assistant (بقیه ← user).</p>
+  <h3>۶.۲ چرخهٔ استریم و پاسخ کامل</h3>
+  <p><b>چرخهٔ استریم استاندارد Anthropic:</b> <code class="ic">message_start</code> (آبجکت message با usage ورودی) ← <code class="ic">ping</code> ← توالی بلوک‌ها: هر بلوک با <code class="ic">content_block_start</code> باز، با <code class="ic">content_block_delta</code> پر و با <code class="ic">content_block_stop</code> بسته می‌شود. تفکر مدل بلوک مستقل <code class="ic">thinking</code> با <code class="ic">thinking_delta</code> است و پاسخ نهایی بلوک <code class="ic">text</code> با <code class="ic">text_delta</code> — جابه‌جایی بین تفکر و پاسخ، بلوک قبلی را می‌بندد و بلوک جدید را با index بعدی باز می‌کند. پایان: <code class="ic">message_delta</code> (با <code class="ic">stop_reason:"end_turn"</code> و output_tokens) ← <code class="ic">message_stop</code>. این ترتیب دقیقاً همان چیزی است که anthropic SDK برای بازسازی استریم انتظار دارد.</p>
+  <p><b>غیراستریم:</b> آبجکت <code class="ic">message</code> با آرایهٔ content از بلوک‌ها — اگر تفکر موجود باشد <code class="ic">[{"type":"thinking",...},{"type":"text",...}]</code> و اگر نه فقط بلوک text. خطای 429 آپستریم این‌جا با <code class="ic">type:"rate_limit_error"</code> برگردانده می‌شود (نه api_error) تا SDK منطق retry خودش را اجرا کند.</p>
+  <pre class="code"># Python — SDK رسمی Anthropic
+import anthropic
+client = anthropic.Anthropic(
+    base_url="http://localhost:3000",
+    api_key="sk-ant-api03-9lamB2K7KoYT8fw8tAp2CKL5kKsOHKhN4mE9eawuzRuW0aU3umJirsEFbS3B6RCjLRw8lrJ0YRmsnxECIu3nHaKM",
+)
+with client.messages.stream(
+    model="claude-fable-5.1",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "سلام!"}],
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)</pre>
+
+  <!-- 7 Internal contract -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 07</div>
+    <div class="sec-title">قرارداد داخلی چت | Internal Chat Contract (/api)</div>
+    <div class="divider"></div>
+  </div>
+  <p>UI چت (هر دو نسخه) با لایهٔ AI از طریق این قرارداد ساده‌تر حرف می‌زند — این یک API عمومی نیست و برخلاف /v1 نیازی به کلید ندارد. تفاوت مهم <code class="ic">/api/chat</code> با <code class="ic">/v1/*</code> این است که این‌جا <b>پروکسی خام</b> هستیم: پاسخ آپستریم بدون تبدیل فرمت pipe می‌شود و پارس/نمایش در کلاینت انجام می‌گیرد (همان منطق پارسر SSE، سمت مرورگر). نام مدل این‌جا هم با resolveModelId نرمال می‌شود.</p>
+  <pre class="code">POST /api/chat  {messages:[{role,content}], modelId, thinking, deepSearch, stream}
+  ← استریم SSE سبک OpenAI آپستریم (delta.content + delta.reasoning_content) یا JSON کامل
+  ← خطا: {error:{message}} با 413/502/504 یا عبور کد آپستریم (مثلاً 429)
+
+GET /api/ping  →  {status:"ok"|"error", ms:number, sample:string(≤200)}
+GET /api/keys  →  {openai, anthropic}   # فقط Next؛ app.js با window.__FM__ تزریق می‌کند</pre>
+  <p><code class="ic">/api/ping</code> برای دکمهٔ «اتصال؟» است: یک درخواست سبک <code class="ic">stream:false</code> با پیام ping می‌فرستد و تأخیر واقعی آپستریم را گزارش می‌کند — پاسخ ۲ تا ۳ ثانیه‌ای طبیعی است و حتی وقتی آپستریم خطای سهمیه می‌دهد، endpoint خودش سالم ارزیابی می‌شود چون پیام آپستریم در sample دیده می‌شود.</p>
+
+  <!-- 8 Keys -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 08</div>
+    <div class="sec-title">کلیدها و احراز هویت | API Keys &amp; Authentication</div>
+    <div class="divider"></div>
+  </div>
+  <p>کلیدها در <code class="ic">api-keys.json</code> (ریشهٔ پروژه، permission <code class="ic">600</code>) نگه‌داری می‌شوند و بین هر دو نسخه مشترک‌اند:</p>
+  <pre class="code">{
+  "openai":    "sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50",
+  "anthropic": "sk-ant-api03-9lamB2K7KoYT8fw8tAp2CKL5kKsOHKhN4mE9eawuzRuW0aU3umJirsEFbS3B6RCjLRw8lrJ0YRmsnxECIu3nHaKM",
+  "createdAt": "2026-09-14T…"
+}</pre>
+  <ul>
+    <li><b>قواعد تولید</b> (اولین اجرا اگر فایل نباشد — <code class="ic">src/lib/apikeys.ts</code> و <code class="ic">loadOrCreateKeys()</code> در app.js): کلید سبک OpenAI = <code class="ic">sk-</code> + ۴۸ نویسهٔ الفباعددی تصادفی؛ کلید سبک Anthropic = <code class="ic">sk-ant-api03-</code> + ۸۸ نویسه — دقیقاً با الگوی رسمی تا اعتبارسنجی سمت کلاینت SDK ها رد نشود.</li>
+    <li><b>اولویت:</b> متغیرهای محیطی <code class="ic">OPENAI_API_KEY</code> / <code class="ic">ANTHROPIC_API_KEY</code> روی فایل override می‌کنند (برای استقرار بدون فایل).</li>
+    <li><b>سیاست پذیرش:</b> هر دو کلید روی هر دو اندپوینت کار می‌کنند — رفتار عمدی برای ساده نگه‌داشتن مصرف‌کننده.</li>
+    <li><b>کش و چرخش:</b> نتایج در حافظه کش می‌شود؛ برای اعمال تغییر فایل باید سرور را ری‌استارت کنید. چرخش کلید = ویرایش یا حذف فایل (اجرای بعدی می‌سازد) یا ست‌کردن env.</li>
+  </ul>
+
+  <!-- 9 Errors -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 09</div>
+    <div class="sec-title">مدیریت خطا و محدودیت‌ها | Error Handling &amp; Limits</div>
+    <div class="divider"></div>
+  </div>
+  <p>ماتریس کامل خطاها از دید مصرف‌کنندهٔ API — در همهٔ مسیرها خطا «در فرمت مقصد» برمی‌گردد (آبجکت OpenAI یا ساختار <code class="ic">{type:"error",error:{type,message}}</code> آنتروپیک):</p>
+  <table>
+    <thead><tr><th style="width:9%">کد</th><th style="width:27%">معنا</th><th style="width:32%">ریشه</th><th>اقدام</th></tr></thead>
+    <tbody>
+      <tr><td>400</td><td>invalid_request_error</td><td>JSON خراب، messages خالی، نبود model/max_tokens در /v1/messages</td><td>اصلاح درخواست</td></tr>
+      <tr><td>401</td><td>invalid_api_key</td><td>هدر احراز هویت غایب یا اشتباه</td><td>کلید صحیح (بخش ۸)</td></tr>
+      <tr><td>413</td><td>بدنه بیش از حد بزرگ</td><td>سقف MAX_BODY_BYTES = ۵ مگابایت</td><td>تاریخچه را کوتاه کنید</td></tr>
+      <tr><td>429</td><td>rate_limit_error (آنتروپیک)</td><td>سهمیهٔ آپستریم «providers exhausted» — رفتار سرویس رایگان</td><td>چند ثانیه بعد retry — <b>باگ نیست، مخفی هم نکنید</b></td></tr>
+      <tr><td>502</td><td>api_error</td><td>اتصال به آپستریم برقرار نشد (شبکه/قطعی)</td><td>ping بگیرید، بعداً تلاش کنید</td></tr>
+      <tr><td>504</td><td>api_error</td><td>تایم‌اوت ۱۸۰ ثانیه‌ای آپستریم</td><td>retry؛ اگر پایدار شد وضعیت آپستریم را ببینید</td></tr>
+    </tbody>
+  </table>
+  <p><b>نکات ظریف برای توسعه‌دهنده:</b> (۱) خطای 429 که «وسط» یک استریم باز برسد قابل تبدیل به کد HTTP نیست — در مسیر OpenAI به‌صورت <code class="ic">delta:{content:"⚠️ …"}</code> و در مسیر Anthropic به‌صورت text_delta داخل بلوک text منتشر می‌شود تا کلاینت چیزی ببیند. (۲) پاسخ خالی آپستریم هرگز 200 خالی برنمی‌گردد؛ عبارت «⚠️ پاسخ خالی از سرور دریافت شد» جایگزین می‌شود تا SDK ها متن خالی را خطا نگیرند. (۳) CORS اندپوینت‌های /v1 باز است و هدرهای <code class="ic">Authorization</code>، <code class="ic">x-api-key</code> و <code class="ic">anthropic-version</code> را صریحاً مجاز می‌کند — از مرورگر هم مستقیم قابل مصرف است.</p>
+
+  <!-- 10 Playbook -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 10</div>
+    <div class="sec-title">کتاب راهنمای توسعه | Development Playbook</div>
+    <div class="divider"></div>
+  </div>
+  <div class="play"><div class="p-t"><span class="p-n">۱</span>افزودن فیلد اکستنشن جدید (مثل thinking / deep_search)</div>
+    <p>سه ایستگاه: (۱) در route مربوطه بخوانید و به payload آپستریم اضافه کنید (<span class="mono">parsed.my_field === true</span>)؛ (۲) همان فیلد را در payload builder داخل app.js اضافه کنید؛ (۳) اگر UI دارد، چک‌باکس را در هر دو فرانت اضافه کنید. نام فیلد در /v1/chat/completions از قاعدهٔ snake_case پیروی می‌کند (مثل deep_search) و در payload داخلی camelCase می‌شود (deepSearch) — این نگاشت عمدی است تا با استاندارد OpenAI سازگار بمانیم.</p></div>
+  <div class="play"><div class="p-t"><span class="p-n">۲</span>تغییر یا تعویض آپستریم</div>
+    <p><span class="mono">UPSTREAM_URL</span> در <span class="mono">src/lib/upstream.ts</span> و ثابت هم‌نام در app.js (بالای openUpstream) را هم‌زمان عوض کنید؛ هدرهای <span class="mono">SPOOFED_HEADERS</span> را با دامنهٔ جدید هماهنگ کنید؛ و اگر فرمت پاسخ عوض شد، طبق بخش ۴ اول <span class="mono">src/lib/sse.ts</span> و معادل <span class="mono">makeUpstreamParser</span> را اصلاح کنید — بقیهٔ سیستم نباید متوجه شود.</p></div>
+  <div class="play"><div class="p-t"><span class="p-n">۳</span>آزمون سریع لایهٔ AI — شش curl</div>
+    <pre class="code">K="sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50"
+A="sk-ant-api03-9lamB2K7KoYT8fw8tAp2CKL5kKsOHKhN4mE9eawuzRuW0aU3umJirsEFbS3B6RCjLRw8lrJ0YRmsnxECIu3nHaKM"
+B=http://localhost:3000
+curl -s $B/api/ping                                                # ۱ سلامت آپستریم
+curl -s $B/v1/models -H "Authorization: Bearer $K" | head -c 400   # ۲ لیست ۷ مدل
+curl -s $B/v1/models | head -c 200                                 # ۳ 401 بدون کلید
+curl -sN $B/v1/chat/completions -H "Authorization: Bearer $K" \
+     -H "Content-Type: application/json" \
+     -d '{"model":"kimi-k3","messages":[{"role":"user","content":"سلام"}],"stream":true}'
+# ۴ استریم + [DONE]
+curl -s $B/v1/chat/completions -H "Authorization: Bearer $K" \
+     -H "Content-Type: application/json" \
+     -d '{"model":"glm-5.2","messages":[{"role":"user","content":"سلام"}]}'
+# ۵ غیراستریم + usage
+curl -s $B/v1/messages -H "x-api-key: $A" -H "Content-Type: application/json" \
+     -d '{"model":"claude-fable-5.1"}'                             # ۶ 400 با "max_tokens: Field required"</pre></div>
+  <div class="play"><div class="p-t"><span class="p-n">۴</span>دیباگ و بهترین شیوه‌ها</div>
+    <p><b>لاگ سرور:</b> هر درخواست با لاگ رنگی ANSI (زمان/مسیر/کد آپستریم/مدت) در کنسول هر دو نسخه چاپ می‌شود — اولین نقطهٔ شروع دیباگ. <b>پنل Raw SSE:</b> در UI چت، دیتای خام آپستریم را تا ۸۰ کیلوبایت نشان می‌دهد؛ برای تشخیص «مشکل از فرمت آپستریم است یا از تبدیل ما» بی‌رقیب است. <b>نام مدل‌ها همیشه از منبع واحد</b> — هرگز id مدل را در فایل دیگری hardcode نکنید. <b>تفکر و deep_search هزینه‌دارند</b> (کندتر و پرخطاتر) — پیش‌فرض false را در نمونه‌ها ترویج کنید. <b>پس از هر تغییر:</b> <span class="mono">bun run lint</span> (صفر خطا) + <span class="mono">node --check app.js</span> + شش curl بالا.</p></div>
+
+  <!-- 11 Roadmap -->
+  <div class="chapter-header">
+    <div class="sec-tag">Section 11</div>
+    <div class="sec-title">نقشهٔ راه لایهٔ AI | AI Layer Roadmap</div>
+    <div class="divider"></div>
+  </div>
+  <p>اولویت‌بندی پیشنهادی بر اساس نسبت ارزش به هزینه: (۱) <b>Retry خودکار با backoff برای 429</b> در openUpstream — یک retry با تأخیر ۲–۵ ثانیه بیشترین بهبود تجربه را با کمترین ریسک می‌دهد. (۲) <b>فیلدهای اختیاری group/vendor در پاسخ /v1/models</b> — سازگار با OpenAI می‌ماند چون فیلد اضافه است و کلاینت‌های بالادستی می‌توانند گروه‌بندی کنند. (۳) <b>شمارش توکن واقعی‌تر</b> برای usage (به‌جای نویسه تقسیم بر ۴). (۴) <b>Rate limit و audit log سمت خودمان</b> اگر پروژه عمومی شود. (۵) <b>پشتیبانی ورودی تصویر/فایل</b> در صورت باز شدن آن در آپستریم. هر آیتم باید طبق Playbook بخش ۱۰ در هر دو نسخه هم‌زمان پیاده شود، با شش curl تأیید گردد و ردیفی در <code class="ic">worklog.md</code> بگیرد تا زنجیرهٔ تاریخچهٔ پروژه قطع نشود.</p>
+  <h3>۱۱.۱ مرجع سریع فایل‌های لایهٔ AI</h3>
+  <table class="tbl-flow">
+    <thead><tr><th style="width:26%">نقش</th><th style="width:38%">نسخهٔ Next.js</th><th>معادل در app.js</th></tr></thead>
+    <tbody>
+      <tr><td>کاتالوگ مدل‌ها + نرمال‌سازی</td><td><span class="mono">src/lib/models.ts</span></td><td><span class="mono">FM_MODELS</span> (خط ۶۶) · <span class="mono">resolveModelId</span> (۸۳)</td></tr>
+      <tr><td>انتقال آپستریم + هدرهای جعلی</td><td><span class="mono">src/lib/upstream.ts</span></td><td><span class="mono">openUpstream</span> (۲۰۸۳)</td></tr>
+      <tr><td>پارسر جهانی SSE</td><td><span class="mono">src/lib/sse.ts</span></td><td><span class="mono">makeUpstreamParser</span> (۲۳۹۹) · <span class="mono">collectUpstreamText</span> (۲۵۲۰)</td></tr>
+      <tr><td>ابزار مشترک /v1 (CORS، SSE، flatten، usage)</td><td><span class="mono">src/lib/v1.ts</span></td><td>توابع خطی کنار هندلرها (<span class="mono">flattenContent</span> ۲۳۷۲)</td></tr>
+      <tr><td>کلیدها</td><td><span class="mono">src/lib/apikeys.ts</span></td><td><span class="mono">loadOrCreateKeys</span> + <span class="mono">getBearerToken</span> (۲۳۴۷)</td></tr>
+      <tr><td>اندپوینت OpenAI</td><td><span class="mono">src/app/v1/chat/completions/route.ts</span> + <span class="mono">v1/models/route.ts</span></td><td>هندلرهای <span class="mono">/v1/chat/completions</span> و <span class="mono">/v1/models</span></td></tr>
+      <tr><td>اندپوینت Anthropic</td><td><span class="mono">src/app/v1/messages/route.ts</span></td><td>هندلر <span class="mono">/v1/messages</span> + <span class="mono">anthropicError</span> (۲۳۶۷)</td></tr>
+      <tr><td>پروکسی داخلی چت</td><td><span class="mono">src/app/api/chat/route.ts</span> + <span class="mono">api/ping</span> + <span class="mono">api/keys</span></td><td>هندلرهای <span class="mono">/api/chat</span> و <span class="mono">/api/ping</span> (+ <span class="mono">window.__FM__</span>)</td></tr>
+    </tbody>
+  </table>
+  <h3>۱۱.۲ هم‌بستهٔ سندهای پروژه</h3>
+  <table>
+    <thead><tr><th style="width:22%">سند</th><th>نقش</th><th style="width:18%">فرمت</th></tr></thead>
+    <tbody>
+      <tr><td><span class="mono">README.md</span></td><td>داکیومنت کامل پروژه: معماری، نصب و اجرا، مرجع API مقدماتی، تاریخچه و نقشهٔ راه کلی</td><td>MD + PDF</td></tr>
+      <tr><td><span class="mono">HANDOFF.md</span></td><td>سند تحویل: TL;DR سه‌دستوری، ۱۰ نکتهٔ بحرانی، قرارداد فرانت-بک، چک‌لیست صحت‌سنجی</td><td>MD + PDF</td></tr>
+      <tr><td><span class="mono">AI-GUIDE.md</span> (همین سند)</td><td>مرجع لایهٔ AI: مدل‌ها، آپستریم، SSE، اندپوینت‌های /v1، کلیدها، خطاها، Playbook</td><td>MD + PDF</td></tr>
+      <tr><td><span class="mono">worklog.md</span></td><td>گزارش خام تسک‌ها با جزئیات تست و تصمیم‌ها — منبع تاریخچه</td><td>MD</td></tr>
+    </tbody>
+  </table>
+
+  <div class="closing">
+    <div class="en">SMART CHAT — AI DEVELOPMENT GUIDE · V1.0 · SEPTEMBER 2026</div>
+    <div class="fa">این سند را به‌همراه <b>README.md</b> (داکیومنت کامل پروژه) و <b>HANDOFF.md</b> (سند تحویل و نکات بحرانی) بخوانید؛ مرجع اندپوینت‌های README مقدماتی‌تر و این سند عمیق‌تر و کاربردی‌تر است. پس از هر تغییر در لایهٔ AI، بخش مربوطهٔ همین راهنما و جدول مدل‌ها را همگام به‌روزرسانی کنید و ردیف جدیدی در worklog.md ثبت کنید.</div>
+  </div>
+
+</div>
+</body>
+</html>
