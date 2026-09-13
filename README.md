@@ -280,3 +280,5 @@ curl -N http://localhost:3000/v1/messages \
 - **استقرار پروداکشن:** `bun run build` + اجرای standalone (پشت reverse proxy با `X-Accel-Buffering: no`)، یا `node app.js` با systemd/pm2.
 - **تست‌های خودکار:** اسکریپت smoke برای ۶ مسیر (فعلاً چک‌لیست دستی در `HANDOFF.md` § 5).
 - **چند‌کاربره‌سازی (اختیاری):** محدودسازی نرخ و احراز هویت جدا برای `/api/chat` اگر اپ عمومی شود.
+#   A i P r o v i d e r  
+ 
