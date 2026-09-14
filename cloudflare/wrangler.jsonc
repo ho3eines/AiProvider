@@ -1,0 +1,33 @@
+{
+  // ── پیکربندی Cloudflare Workers برای «چت هوشمند» ──
+  // اجرا:  npm run cf:dev      (محلی با workerd)
+  //        npm run cf:deploy   (دیپلوی روی اکانت Cloudflare)
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "smart-chat",
+  "main": "worker.mjs",
+
+  // app.js از node:crypto / node:path / node:https استفاده می‌کند؛ با این فلگ
+  // رانتایم Workers آن‌ها را فراهم می‌کند (و import شدن app.js ممکن می‌شود).
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "vars": {
+    // آپستریم پیش‌فرض (خودش یک Worker است) — برای تست محلی به mock تغییرش دهید
+    "UPSTREAM_URL": "https://freemodels-chat.freemodels.workers.dev/",
+    // استقرار عمومی = کلیدها در UI ماسک شوند
+    "EXPOSE_KEYS": "false"
+  },
+
+  // ── اختیاری: KV برای پایداری کلیدهای API بین دیپلوی‌ها ──
+  // ۱) wrangler kv namespace create API_KEYS
+  // ۲) id را اینجا بگذارید و کامنت را بردارید
+  // "kv_namespaces": [
+  //   { "binding": "API_KEYS", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }
+  // ],
+
+  // لاگ‌های Worker در داشبورد (Workers ▸ Logs) و `wrangler tail`
+  "observability": { "enabled": true }
+
+  // ── فقط در پلن پولی: سقف CPU هر درخواست (پیش‌فرض ۳۰ ثانیه) ──
+  // "limits": { "cpu_ms": 120000 }
+}

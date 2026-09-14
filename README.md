@@ -2,18 +2,18 @@
 
 > **مستندات کامل پروژه | Full Project Documentation** — نسخه ۲.۰ · ۱۳ سپتامبر ۲۰۲۶ (۲۲ شهریور ۱۴۰۵)
 > ساختار انگلیسی + توضیحات فارسی · English structure + Persian body
-> **جدید در این نسخه:** استقرار آمادهٔ Docker + Railway، اندپوینت `/healthz`، smoke test خودکار، و سخت‌سازی کلیدهای API
+> **جدید در این نسخه:** استقرار آمادهٔ Docker + Railway، اندپوینت `/healthz`، smoke test خودکار، سخت‌سازی کلیدهای API، و **استقرار روی Cloudflare Workers / Pages** (`cloudflare/`)
 
 | Item | Value |
 |---|---|
 | **Project Name** | چت هوشمند (Smart Chat) |
 | **Stack** | Next.js 16 · React 19 · Tailwind CSS 4 · TypeScript + نسخهٔ تک‌فایل Node خالص (`app.js`) |
 | **Purpose** | Chat UI فارسی RTL متصل به سرویس رایگان freemodels + سرور API سازگار با OpenAI و Anthropic |
-| **Entry Points** | `src/app/page.tsx` (Next.js) · `app.js` (standalone) |
-| **Deployment** | `Dockerfile` (Next.js — پیش‌فرض Railway) · `Dockerfile.single` (app.js) · `docker-compose.yml` · `railway.json` |
+| **Entry Points** | `src/app/page.tsx` (Next.js) · `app.js` (standalone) · `cloudflare/worker.mjs` (Workers/Pages) |
+| **Deployment** | `Dockerfile` (Next.js — پیش‌فرض Railway) · `Dockerfile.single` (app.js) · `docker-compose.yml` · `railway.json` · `cloudflare/` (Workers + Pages) |
 | **Config Files** | `next.config.ts` · `package.json` · `package-lock.json` · `.env.example` · `api-keys.example.json` |
-| **Docs** | `README.md` (همین فایل) · `HANDOFF.md` (سند تحویل) · `AI-GUIDE.md` · `worklog.md` (گزارش تسک‌ها) |
-| **Verified** | `npm run build` ✓ · `npm run lint` (۰ خطا) ✓ · `npm run typecheck` (۰ خطا) ✓ · `npm run smoke` (۷/۷) ✓ |
+| **Docs** | `README.md` (همین فایل) · `HANDOFF.md` (سند تحویل) · `AI-GUIDE.md` · `worklog.md` (گزارش تسک‌ها) · `cloudflare/README.md` (راهنمای کلودفلر) |
+| **Verified** | `npm run build` ✓ · `npm run lint` (۰ خطا) ✓ · `npm run typecheck` (۰ خطا) ✓ · `npm run smoke` (۷/۷) ✓ · `npm run cf:test` روی Workers و Pages (۱۴/۱۴) ✓ |
 
 ---
 
@@ -25,16 +25,17 @@
 4. [Installation & Run (Local) | نصب و اجرای محلی](#4-installation--run-local--نصب-و-اجرای-محلی)
 5. [Docker | اجرای داکر](#5-docker--اجرای-داکر)
 6. [Railway | استقرار روی Railway](#6-railway--استقرار-روی-railway)
-7. [Environment Variables | متغیرهای محیطی](#7-environment-variables--متغیرهای-محیطی)
-8. [Architecture | معماری](#8-architecture--معماری)
-9. [Features | قابلیت‌ها](#9-features--قابلیتها)
-10. [Models | مدل‌ها](#10-models--مدلها)
-11. [API Reference | مرجع API](#11-api-reference--مرجع-api)
-12. [Security & Production Checklist | امنیت و چک‌لیست پروداکشن](#12-security--production-checklist--امنیت-و-چکلیست-پروداکشن)
-13. [Verification | راستی‌آزمایی](#13-verification--راستیآزمایی)
-14. [Troubleshooting | رفع اشکال](#14-troubleshooting--رفع-اشکال)
-15. [Development History | تاریخچهٔ توسعه](#15-development-history--تاریخچهٔ-توسعه)
-16. [Known Issues & Roadmap | مشکلات و نقشهٔ راه](#16-known-issues--roadmap--مشکلات-شناختهشده-و-نقشهٔ-راه)
+7. [Cloudflare Workers & Pages | استقرار روی کلودفلر](#7-cloudflare-workers--pages--استقرار-روی-کلودفلر)
+8. [Environment Variables | متغیرهای محیطی](#8-environment-variables--متغیرهای-محیطی)
+9. [Architecture | معماری](#9-architecture--معماری)
+10. [Features | قابلیت‌ها](#10-features--قابلیتها)
+11. [Models | مدل‌ها](#11-models--مدلها)
+12. [API Reference | مرجع API](#12-api-reference--مرجع-api)
+13. [Security & Production Checklist | امنیت و چک‌لیست پروداکشن](#13-security--production-checklist--امنیت-و-چکلیست-پروداکشن)
+14. [Verification | راستی‌آزمایی](#14-verification--راستیآزمایی)
+15. [Troubleshooting | رفع اشکال](#15-troubleshooting--رفع-اشکال)
+16. [Development History | تاریخچهٔ توسعه](#16-development-history--تاریخچهٔ-توسعه)
+17. [Known Issues & Roadmap | مشکلات و نقشهٔ راه](#17-known-issues--roadmap--مشکلات-شناختهشده-و-نقشهٔ-راه)
 
 ---
 
@@ -79,20 +80,34 @@ railway domain               # ۴) ساخت/دریافت دامنهٔ عمومی
 
 جزئیات کامل (مسیر داشبورد، health check، لاگ‌ها، دیپلوی مجدد) در [بخش ۶](#6-railway--استقرار-روی-railway).
 
+### روی Cloudflare Workers (خلاصهٔ ۴ قدمی)
+
+```bash
+npm install                    # ۱) نصب وابستگی‌ها (wrangler به‌عنوان devDependency)
+npx wrangler login             # ۲) ورود به اکانت Cloudflare (یک‌بار)
+npm run cf:deploy              # ۳) دیپلوی → https://smart-chat.<subdomain>.workers.dev
+npx wrangler secret put OPENAI_API_KEY    --config cloudflare/wrangler.jsonc   # ۴) کلیدها
+npx wrangler secret put ANTHROPIC_API_KEY --config cloudflare/wrangler.jsonc
+```
+
+اجرای محلی روی رانتایم واقعی کلودفلر (workerd): `npm run cf:dev` → `http://127.0.0.1:8787`
+(برای تست بدون اینترنت: `npm run cf:mock`). مسیر **Pages** هم آماده است: `npm run cf:pages:deploy`.
+جزئیات کامل در [بخش ۷](#7-cloudflare-workers--pages--استقرار-روی-کلودفلر) و [`cloudflare/README.md`](cloudflare/README.md).
+
 ---
 
 ## 3. System Requirements | پیش‌نیازهای سیستم
 
-| Requirement | Next.js Version | Single-File (`app.js`) | Docker / Railway |
-|---|---|---|---|
-| **Runtime** | Node.js ≥ **20.9** (تست‌شده با v22.22.3) | Node.js ≥ 18 (فقط ماژول‌های داخلی) | تصویر پایهٔ `node:22-slim` / `node:22-alpine` |
-| **Package Manager** | npm (با `package-lock.json` قفل‌شده) یا bun ≥ 1.3 | **هیچ** — بدون نصب پکیج اجرا می‌شود | npm داخل بیلد (نیازی به نصب محلی نیست) |
-| **Disk** | ~۹۵۰MB برای `node_modules` در توسعه (خروجی standalone فقط ~۳۶MB) | ~۱۵۰KB (فقط app.js + api-keys.json) | تصویر نهایی تقریباً ۱۵۰–۲۰۰MB (Next) / ۵۰–۶۰MB (single) |
-| **Memory** | ~۵۱۲MB برای بیلد، ~۱۵۰–۲۵۰MB در اجرا | ~۶۰MB | Railway: پیش‌فرض کافی است (۱ vCPU / ۱GB توصیه) |
-| **Network (خروجی)** | دسترسی به `freemodels-chat.freemodels.workers.dev` و `fonts.googleapis.com` | فقط آپستریم (لوگوها embed هستند) | همان — Railway دسترسی خروجی دارد |
-| **OS** | Linux / macOS / Windows (WSL توصیه) | همان | Linux container |
-| **Port** | 3000 پیش‌فرض · `PORT` env | 3000 پیش‌فرض · `PORT` env | Railway خودش `PORT` را تزریق می‌کند |
-| **Bind address** | `HOSTNAME=0.0.0.0` (پیش‌فرض) | `HOST=0.0.0.0` (پیش‌فرض) | **باید** `0.0.0.0` باشد، نه `127.0.0.1` |
+| Requirement | Next.js Version | Single-File (`app.js`) | Docker / Railway | Cloudflare Workers / Pages |
+|---|---|---|---|---|
+| **Runtime** | Node.js ≥ **20.9** (تست‌شده با v22.22.3) | Node.js ≥ 18 (فقط ماژول‌های داخلی) | تصویر پایهٔ `node:22-slim` / `node:22-alpine` | رانتایم لبهٔ کلودفلر (workerd) — بدون سرور Node |
+| **Package Manager** | npm (با `package-lock.json` قفل‌شده) یا bun ≥ 1.3 | **هیچ** — بدون نصب پکیج اجرا می‌شود | npm داخل بیلد (نیازی به نصب محلی نیست) | npm فقط برای `wrangler` (devDependency)؛ زمان اجرا **صفر** وابستگی |
+| **Disk** | ~۹۵۰MB برای `node_modules` در توسعه (خروجی standalone فقط ~۳۶MB) | ~۱۵۰KB (فقط app.js + api-keys.json) | تصویر نهایی تقریباً ۱۵۰–۲۰۰MB (Next) / ۵۰–۶۰MB (single) | باندل Worker: **۱۸۴KB خام / ۵۴KB gzip** |
+| **Memory** | ~۵۱۲MB برای بیلد، ~۱۵۰–۲۵۰MB در اجرا | ~۶۰MB | Railway: پیش‌فرض کافی است (۱ vCPU / ۱GB توصیه) | ۱۲۸MB برای هر ایزوله (سقف پلتفرم) |
+| **Network (خروجی)** | دسترسی به `freemodels-chat.freemodels.workers.dev` و `fonts.googleapis.com` | فقط آپستریم (لوگوها embed هستند) | همان — Railway دسترسی خروجی دارد | Worker→Worker به آپستریم (خودش روی کلودفلر است) |
+| **OS** | Linux / macOS / Windows (WSL توصیه) | همان | Linux container | — (روی edge کلودفلر اجرا می‌شود؛ `wrangler` روی هر سه OS) |
+| **Port** | 3000 پیش‌فرض · `PORT` env | 3000 پیش‌فرض · `PORT` env | Railway خودش `PORT` را تزریق می‌کند | ندارد — `*.workers.dev` یا `*.pages.dev` |
+| **Bind address** | `HOSTNAME=0.0.0.0` (پیش‌فرض) | `HOST=0.0.0.0` (پیش‌فرض) | **باید** `0.0.0.0` باشد، نه `127.0.0.1` | ندارد (فقط `wrangler dev --ip 0.0.0.0` برای پیش‌نمایش محلی) |
 
 نکته‌های فنی:
 
@@ -144,6 +159,14 @@ npm run smoke                # تست ۷ مسیر حیاتی روی سرور د�
 | `npm run typecheck` | `tsc --noEmit` (خروجی سالم: ۰ خطا) |
 | `npm run smoke` | تست دود استقرار: ۷ مسیر حیاتی (`--url` برای سرور راه دور) |
 | `npm run keys:generate` | ساخت کلیدهای API پایدار، آمادهٔ کپی در Railway (`-- --write` → ذخیره در فایل) |
+| `npm run cf:dev` | اجرای نسخهٔ Cloudflare روی workerd محلی → `http://127.0.0.1:8787` |
+| `npm run cf:deploy` | دیپلوی روی Cloudflare Workers (`wrangler deploy`) |
+| `npm run cf:tail` | لاگ زندهٔ Worker دیپلوی‌شده (`wrangler tail`) |
+| `npm run cf:mock` | ماک آپستریم freemodels برای تست آفلاین → `127.0.0.1:9912` |
+| `npm run cf:test` | ۱۴ تست سرتاسری نسخهٔ Worker (استریم زنده، رویدادهای Anthropic، abort) |
+| `npm run cf:smoke` | همان `smoke` ولی روی `http://127.0.0.1:8787` |
+| `npm run cf:pages:build` | باندل نسخهٔ Pages → `cloudflare/pages-dist/_worker.js` |
+| `npm run cf:pages:deploy` | بیلد + `wrangler pages deploy` |
 | `npm run docker:build` | `docker build -t smart-chat:latest .` |
 | `npm run docker:build:single` | بیلد تصویر نسخهٔ تک‌فایل |
 | `npm run docker:run` | اجرای تصویر روی `http://localhost:3000` |
@@ -294,19 +317,87 @@ curl -N $URL/v1/chat/completions \
 
 ---
 
-## 7. Environment Variables | متغیرهای محیطی
+## 7. Cloudflare Workers & Pages | استقرار روی کلودفلر
+
+> راهنمای کامل: [`cloudflare/README.md`](cloudflare/README.md) — اینجا خلاصهٔ عملیاتی است.
+
+همان اپ (UI + `/api/chat` + `/api/ping` + `/healthz` + `/v1/*`) بدون سرور Node روی رانتایم
+Cloudflare اجرا می‌شود. نقطهٔ ورود `cloudflare/worker.mjs` است که UI، لیست مدل‌ها، هدرهای
+جعلی آپستریم و پارسر SSE را **مستقیماً از `app.js` ایمپورت می‌کند** — یعنی منطق دوقلو نمی‌شود
+و تغییر در `app.js` خودبه‌خود در نسخهٔ کلودفلر هم اعمال می‌شود.
+
+**چرا شدنی است؟** آپستریم (`freemodels-chat.freemodels.workers.dev`) خودش یک Worker است، پس
+Worker→Worker با `fetch` رانتایم و استریم SSE بدون بافر کار می‌کند؛ هدرهای جعلی
+(`Origin`/`Referer`/`User-Agent`) در Workers قابل ست‌کردن‌اند؛ و هیچ فایل‌سیستمی لازم نیست
+(کلیدها از Secret یا KV می‌آیند).
+
+### ۷.۱ اجرای محلی
+
+```bash
+npm install                                   # wrangler نصب می‌شود (devDependency)
+npm run cf:mock                               # (اختیاری) ماک آپستریم → 127.0.0.1:9912
+npm run cf:dev                                # workerd → http://127.0.0.1:8787
+npm run cf:smoke                              # ۷ تست smoke روی همان پورت
+OPENAI_API_KEY=sk-... npm run cf:test         # ۱۴ تست (استریم واقعی، رویدادهای Anthropic، abort)
+```
+
+### ۷.۲ دیپلوی
+
+```bash
+npx wrangler login
+npm run cf:deploy                             # → https://smart-chat.<subdomain>.workers.dev
+npx wrangler secret put OPENAI_API_KEY   --config cloudflare/wrangler.jsonc
+npx wrangler secret put ANTHROPIC_API_KEY --config cloudflare/wrangler.jsonc
+npm run smoke -- --url https://smart-chat.<subdomain>.workers.dev
+```
+
+نسخهٔ **Pages** هم آماده است: `npm run cf:pages:build` فایل `cloudflare/pages-dist/_worker.js`
+را می‌سازد و `npm run cf:pages:deploy` آن را دیپلوی می‌کند (Build command =
+`npm run cf:pages:build`، Output directory = `cloudflare/pages-dist`).
+
+### ۷.۳ تفاوت‌های کلیدی با نسخهٔ Node/Railway
+
+| موضوع | Node / Railway | Cloudflare |
+|---|---|---|
+| کلیدهای API | `api-keys.json` یا env | **Secret** یا **KV** (کلید تصادفی موقتی اگر هیچ‌کدام نباشد) |
+| `EXPOSE_KEYS` پیش‌فرض | `true` (محلی) | **`false`** (چون دیپلوی عمومی است) |
+| `/healthz` | `runtime: single-file-node` + نسخهٔ node | `runtime: cloudflare-worker` + `keysSource` |
+| `uptimeSec` | عمر پروسه | عمر **ایزوله** (هر نمونه از صفر) |
+| منابع | نامحدود | CPU ۳۰s/درخواست (Free) · ۵۰ زیردرخواست (Free) — مصرف ما: ۱ زیردرخواست |
+| لاگ | کنسول | `npm run cf:tail` (wrangler tail) |
+
+⚠️ نکتهٔ فنی: در workerd مقدار `Date.now()` **در زمان ارزیابی ماژول صفر است**؛ به همین دلیل
+`uptimeSec` و فیلد `created` در `/v1/models` تنبل (در اولین درخواست) محاسبه می‌شوند.
+
+### ۷.۴ راستی‌آزمایی‌شده
+
+| تست | نتیجه |
+|---|---|
+| `wrangler deploy --dry-run` (باندل) | ✓ **۱۸۴.۳۸ KiB خام / ۵۳.۷۲ KiB gzip** |
+| `scripts/smoke.mjs` روی `wrangler dev` (پورت ۸۷۸۷) | ✓ ۷/۷ |
+| `cloudflare/tests/stream.test.mjs` روی `wrangler dev` + ماک | ✓ ۱۴/۱۴ (استریم زنده: ۲۲ فریم در ۸.۴s، اولین تکه در ۰ms) |
+| همان تست روی `wrangler pages dev` (باندل `_worker.js`، پورت ۸۷۸۸) | ✓ ۱۴/۱۴ |
+| همان تست روی نسخهٔ Node (`node app.js`، پورت ۳۰۰۰) | ✓ همهٔ تست‌های عملکردی (فقط `runtime` متفاوت است) + `npm run smoke` ✓ ۷/۷ |
+| رسیدن هدرهای جعلی به آپستریم | ✓ `origin=https://freemodels.pro` در لاگ ماک |
+| `npm run lint` | ✓ ۰ خطا ۰ هشدار |
+
+---
+
+## 8. Environment Variables | متغیرهای محیطی
 
 الگو: `.env.example` (کپی کنید به `.env` برای اجرای محلی؛ در Railway همان‌ها را در Variables بگذارید).
+برای Cloudflare از `cloudflare/.dev.vars.example` استفاده کنید (Secret/KV در بخش ۷).
 
 | Variable | Default | Where | Description |
 |---|---|---|---|
-| `PORT` | `3000` | هر دو نسخه | پورت گوش‌دادن. Railway خودش تزریق می‌کند — دستی ست نکنید |
+| `PORT` | `3000` | Node/Next.js | پورت گوش‌دادن. Railway خودش تزریق می‌کند — دستی ست نکنید (در Workers معنایی ندارد) |
 | `HOSTNAME` | `0.0.0.0` | Next.js | آدرس bind سرور standalone |
 | `HOST` | `0.0.0.0` | `app.js` | آدرس bind (برای فقط-محلی: `127.0.0.1`) |
-| `OPENAI_API_KEY` | — | هر دو نسخه | کلید سبک OpenAI (`sk-…`)؛ روی فایل کلیدها اولویت دارد |
-| `ANTHROPIC_API_KEY` | — | هر دو نسخه | کلید سبک Anthropic (`sk-ant-api03-…`) |
-| `EXPOSE_KEYS` | `true` | هر دو نسخه | `false` → کلیدها در UI و `GET /api/keys` ماسک می‌شوند (برای سرویس عمومی) |
-| `API_KEYS_FILE` | `api-keys.json` کنار پروژه | هر دو نسخه | مسیر فایل کلیدها؛ در Docker روی volume: `/data/api-keys.json` |
+| `UPSTREAM_URL` | `https://freemodels-chat.freemodels.workers.dev/` | `app.js` · Worker | آدرس آپستریم؛ برای تست می‌توانید به `cloudflare/mock-upstream.mjs` (مثلاً `http://127.0.0.1:9912/`) اشاره کنید |
+| `OPENAI_API_KEY` | — | هر سه نسخه | کلید سبک OpenAI (`sk-…`)؛ روی فایل کلیدها اولویت دارد. در Cloudflare: `wrangler secret put` |
+| `ANTHROPIC_API_KEY` | — | هر سه نسخه | کلید سبک Anthropic (`sk-ant-api03-…`) |
+| `EXPOSE_KEYS` | `true` در Node · **`false` در Worker** | هر سه نسخه | `false` → کلیدها در UI و `GET /api/keys` ماسک می‌شوند (برای سرویس عمومی) |
+| `API_KEYS_FILE` | `api-keys.json` کنار پروژه | Node | مسیر فایل کلیدها؛ در Docker روی volume: `/data/api-keys.json` (در Workers فایل‌سیستم نیست → Secret/KV) |
 | `NODE_ENV` | `production` | Next.js | در تصویر Docker ست شده است |
 | `NEXT_TELEMETRY_DISABLED` | `1` | Next.js | تله‌متری نکست خاموش (در Dockerfile ست شده) |
 | `DATABASE_URL` | `file:./db/custom.db` | Prisma (اختیاری) | فقط اگر از اسکافلد دیتابیس استفاده کنید |
@@ -315,9 +406,9 @@ curl -N $URL/v1/chat/completions \
 
 ---
 
-## 8. Architecture | معماری
+## 9. Architecture | معماری
 
-### 8.1 Request Flow | جریان درخواست
+### 9.1 Request Flow | جریان درخواست
 
 ```
 ┌───────────────────────────── Browser ─────────────────────────────┐
@@ -343,14 +434,14 @@ curl -N $URL/v1/chat/completions \
 
 علاوه بر این، هر دو سرور سه اندپوینت `/v1/*` دارند که **پاسخ آپستریم را با پارسر SSE جهانی (`src/lib/sse.ts`) گرفته و به فرمت استاندارد OpenAI یا Anthropic بازتولید می‌کنند** — یعنی نرمال‌سازی کامل فرمت، نه صرفاً عبور خام.
 
-### 8.2 Upstream Connection | اتصال آپستریم
+### 9.2 Upstream Connection | اتصال آپستریم
 
 - **URL آپستریم:** `https://freemodels-chat.freemodels.workers.dev/` (ثابت در `src/lib/upstream.ts` و معادلش در app.js).
 - **جعل هدرهای مرورگر:** `Origin: https://freemodels.pro`، `Referer: https://freemodels.pro/`، UA کروم ویندوزی، `sec-ch-*` و `sec-fetch-*` کامل، و `Accept-Encoding: identity` تا پاسخ فشرده نباشد و pipe مستقیم بدون decompress ممکن شود.
 - **چرا `node:https`؟** مرورگرهای مدرن و `fetch` ارسال `Origin`/`Referer` دستی را ممنوع می‌کنند؛ برای عبور از CORS آپستریم باید این هدرها واقعاً روی سیم برود.
 - **پایداری استریم:** پاسخ با `pipe` تکه‌به‌تکه (بدون تجمیع بافر) به کلاینت رد می‌شود؛ `Cache-Control: no-cache, no-transform` و `X-Accel-Buffering: no` روی پاسخ ست می‌شود تا پروکسی‌های میانی (از جمله Railway) بافر نکنند. قطع کلاینت → `destroy` فوری آپستریم.
 
-### 8.3 Deployment Layout | چیدمان استقرار
+### 9.3 Deployment Layout | چیدمان استقرار
 
 ```
 repo
@@ -359,10 +450,17 @@ repo
 ├── .dockerignore           ← رازها و فایل‌های سنگین وارد context نمی‌شوند
 ├── railway.json            ← builder=DOCKERFILE · healthcheck=/healthz · restart=ON_FAILURE
 ├── docker-compose.yml      ← اجرای محلی/VPS با volume پایدار کلیدها
+├── cloudflare/
+│   ├── worker.mjs          ← نسخهٔ Workers/Pages (Fetch API) — UI/مدل‌ها/پارسر از app.js
+│   ├── wrangler.jsonc      ← name/main · nodejs_compat · vars (UPSTREAM_URL, EXPOSE_KEYS) · KV
+│   ├── .dev.vars.example   ← الگوی رازهای `wrangler dev`
+│   ├── mock-upstream.mjs   ← ماک آپستریم برای تست آفلاین (پورت 9912)
+│   ├── test/stream.test.mjs← تست سرتاسری استریم (۱۴ تست)
+│   └── pages-build.mjs     ← باندل برای Pages → pages-dist/_worker.js
 └── .next/standalone/       ← خروجی بیلد (server.js + node_modules trace‌شده + public + static)
 ```
 
-### 8.4 File Map | نقشهٔ فایل‌ها
+### 9.4 File Map | نقشهٔ فایل‌ها
 
 | File | Role |
 |---|---|
@@ -384,6 +482,10 @@ repo
 | `src/app/v1/chat/completions/route.ts` | `POST /v1/chat/completions` سازگار OpenAI (استریم/غیراستریم) |
 | `src/app/v1/messages/route.ts` | `POST /v1/messages` سازگار Anthropic (model/max_tokens اجباری) |
 | `app.js` | نسخهٔ تک‌فایل (~۳۱۰۰ خط): `PAGE_CSS` + `PAGE_JS` + `PAGE_HTML` + هندلرهای همان مسیرها + بنر رنگی |
+| `cloudflare/worker.mjs` | نسخهٔ Cloudflare Workers/Pages: روتر Fetch API + پروکسی استریم با `fetch` + کلیدها از Secret/KV؛ UI و پارسر را از `app.js` ایمپورت می‌کند |
+| `cloudflare/wrangler.jsonc` | پیکربندی Workers (نام، `nodejs_compat`، vars، بایندینگ KV اختیاری، observability) |
+| `cloudflare/mock-upstream.mjs` | ماک آپستریم freemodels برای تست بدون اینترنت (SSE + `@error`/`@empty`/`@slow`) |
+| `cloudflare/tests/stream.test.mjs` | تست استریم سرتاسری: زنده‌بودن SSE، رویدادهای Anthropic، `usage`، abort، پاس‌دادن خطا |
 | `scripts/finalize-standalone.mjs` | کپی `public`/`.next/static` داخل `.next/standalone` (کراس‌پلتفرم) |
 | `scripts/generate-keys.mjs` | ساخت کلیدهای پایدار، خروجی آمادهٔ Railway Variables |
 | `scripts/smoke.mjs` | تست دود ۷ مسیر (محلی یا `--url` راه دور) |
@@ -395,9 +497,9 @@ repo
 
 ---
 
-## 9. Features | قابلیت‌ها
+## 10. Features | قابلیت‌ها
 
-### 9.1 Chat UI | رابط چت
+### 10.1 Chat UI | رابط چت
 - **چیدمان:** سایدبار راست 260px (چت جدید، لیست گفتگوها با حذف، خروجی Markdown/JSON، پاک‌کردن همه با confirm) + drawer موبایل؛ هدر با کنترل‌ها؛ ناحیهٔ چت؛ کامپوزر چسبان.
 - **پیکر مدل گروهی** (مطابق HTML واقعی سایت freemodels): سه گروه «Claude Pro / ChatGPT Pro / Other Pro Models» با آیکن‌های lucide، لوگوی 20px هر مدل، ردیف انتخاب‌شدهٔ تیره، hover، اسکرول داخلی، تارگت لمسی 44px در موبایل، بستن با کلیک بیرون و Esc.
 - **کنترل‌های هدر:** تفکر (thinking) · جست‌وجوی عمیق (deepSearch) · استریم · دکمهٔ «اتصال؟» با ping خودکار · پنل Raw SSE (80KB، ltr، mono) · مودال ⚙️ شامل System Prompt و بخش «🔑 اندپوینت‌های API و کلیدها» (نمایش/کپی کلیدها + نمونه curl) · نشانگر وضعیت سبز/زرد/قرمز.
@@ -405,13 +507,13 @@ repo
 - **حافظه:** گفتگوها و تنظیمات در `localStorage` (`fm_chats`/`fm_settings`) — فقط بعد از mount خوانده می‌شود تا hydration نشکند.
 - **موبایل:** همبرگر، اکشن‌های همیشه‌مرئی، safe-area کامپوزر، تست‌شده در 390px.
 
-### 9.2 Markdown & Code | رندر مارک‌داون و کد
+### 10.2 Markdown & Code | رندر مارک‌داون و کد
 رندرر مارک‌داون **دست‌ساز و امن** است (بدون کتابخانه): ابتدا escape کامل HTML، سپس درج کنترل‌شدهٔ تگ‌ها. بلوک‌های کد با placeholder جداسازی می‌شوند و هدر زبان + دکمهٔ «کپی» + هایلایت سینتکس ساده + `dir=ltr` دارند؛ کد اینلاین، بولد/ایتالیک/خط‌خورده/لینک (`target=_blank`)، هدینگ‌ها، لیست‌ها، نقل‌قول و خط افقی هم پشتیبانی می‌شوند. این منطق در `src/lib/markdown.ts` و معادلش در `PAGE_JS` یکسان پیاده‌سازی شده است.
 
-### 9.3 API Server | سرور API
-هر دو نسخه سه اندپوینت استاندارد + مسیرهای داخلی را سرو می‌کنند (جزئیات کامل در بخش ۱۱): لیست مدل‌ها، چت‌کامپلیشن OpenAI و پیام‌های Anthropic — همه با CORS باز شامل هدرهای احراز هویت، و خطاها دقیقاً در فرمت JSON همان API مقصد.
+### 10.3 API Server | سرور API
+هر دو نسخه سه اندپوینت استاندارد + مسیرهای داخلی را سرو می‌کنند (جزئیات کامل در بخش ۱۲): لیست مدل‌ها، چت‌کامپلیشن OpenAI و پیام‌های Anthropic — همه با CORS باز شامل هدرهای احراز هویت، و خطاها دقیقاً در فرمت JSON همان API مقصد.
 
-### 9.4 Operations | قابلیت‌های عملیاتی (جدید)
+### 10.4 Operations | قابلیت‌های عملیاتی (جدید)
 - `GET /healthz` بدون تماس با آپستریم → health check پایدار برای Railway/Docker/K8s.
 - `HEALTHCHECK` داخل هر دو Dockerfile (با خودِ Node، بدون curl).
 - اجرای غیر-root، `PORT`/`HOSTNAME`/`HOST` از env، `/data` آماده برای volume کلیدها.
@@ -420,7 +522,7 @@ repo
 
 ---
 
-## 10. Models | مدل‌ها
+## 11. Models | مدل‌ها
 
 منبع واحد لیست مدل‌ها `src/lib/models.ts` (Next) و ثابت `FM_MODELS` (app.js) است؛ هم پیکر UI و هم اندپوینت‌های `/v1` از همین می‌خوانند، پس همیشه همگام‌اند. مدل پیش‌فرض: **`claude-fable-5.1`**.
 
@@ -438,9 +540,9 @@ repo
 
 ---
 
-## 11. API Reference | مرجع API
+## 12. API Reference | مرجع API
 
-### 11.1 Authentication | احراز هویت
+### 12.1 Authentication | احراز هویت
 
 | Endpoint | Auth |
 |---|---|
@@ -459,7 +561,7 @@ npm run keys:generate
 # → ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-### 11.2 `GET /healthz` — Health Check (سبک)
+### 12.2 `GET /healthz` — Health Check (سبک)
 
 بدون هیچ تماس شبکه‌ای؛ برای health check ارکستراتورها طراحی شده است:
 
@@ -484,7 +586,7 @@ curl -s http://localhost:3000/healthz
 
 > `runtime` در نسخهٔ تک‌فایل `single-file-node` است. مسیر جایگزین `/health` هم در `app.js` پاسخ می‌دهد.
 
-### 11.3 `GET /api/ping` — Upstream Check (سنگین)
+### 12.3 `GET /api/ping` — Upstream Check (سنگین)
 
 درخواست سبک `stream:false` با پیام `ping` **به آپستریم واقعی** می‌فرستد (تایم‌اوت ۲۰ ثانیه):
 
@@ -494,11 +596,11 @@ curl -s http://localhost:3000/healthz
 
 خطای سهمیهٔ آپستریم هم `status:"error"` برمی‌گرداند ولی خودِ سرور سالم است — به همین دلیل برای health check استفاده **نشود**.
 
-### 11.4 `POST /api/chat` — Internal Proxy
+### 12.4 `POST /api/chat` — Internal Proxy
 
 بدنه: `{"messages":[{role,content}...], "modelId":"claude-fable-5.1", "thinking":false, "deepSearch":false, "stream":true}` — پاسخ: عبور مستقیم استریم SSE آپستریم (سبک OpenAI با `delta.reasoning_content`/`delta.content`). خطاها: `413` حجم > 5MB · `502` خطای اتصال · `504` تایم‌اوت ۱۸۰ ثانیه.
 
-### 11.5 `GET /v1/models` — List Models (OpenAI format)
+### 12.5 `GET /v1/models` — List Models (OpenAI format)
 
 **عمومی است و کلید نمی‌خواهد** (کلاینت‌ها هنگام کشف خودکار مدل معمولاً کلید نمی‌فرستند). اندپوینت‌های چت همچنان کلید می‌خواهند و بدون کلید `401 invalid_api_key` می‌دهند.
 
@@ -518,7 +620,7 @@ curl -s http://localhost:3000/v1/models
 
 > فیلدهای `group`/لوگو عمداً در پاسخ نیستند تا فرمت استاندارد OpenAI حفظ شود؛ آن‌ها فقط برای UI هستند. (پاسخ واقعی هر ۷ مدل را دارد.)
 
-### 11.6 `POST /v1/chat/completions` — OpenAI Compatible
+### 12.6 `POST /v1/chat/completions` — OpenAI Compatible
 
 - فیلدها: `model` (نرمال نرم می‌شود؛ خالی → پیش‌فرض)، `messages` (اجباری، نقش‌های ناشناخته → user)، `stream` (boolean)، `stream_options.include_usage`، و دو **اکستنشن غیراستاندارد**: `thinking` و `deep_search` (boolean).
 - **غیراستریم:** آبجکت کامل `chat.completion` با `choices[].message.content` و `usage` تخمینی (~۴ نویسه = ۱ توکن).
@@ -541,7 +643,7 @@ print(client.chat.completions.create(model="claude-fable-5.1",
       messages=[{"role": "user", "content": "سلام"}]).choices[0].message.content)
 ```
 
-### 11.7 `POST /v1/messages` — Anthropic Compatible
+### 12.7 `POST /v1/messages` — Anthropic Compatible
 
 - طبق قوانین Anthropic، `model` و `max_tokens` **اجباری‌اند** (نبود → `400 invalid_request_error` با پیام `model: Field required` / `max_tokens: Field required`).
 - `system` به‌صورت رشته یا آرایهٔ بلوک پذیرفته می‌شود.
@@ -555,7 +657,7 @@ curl -N https://<your-app>.up.railway.app/v1/messages \
   -d '{"model":"claude-fable-5.1","max_tokens":1024,"messages":[{"role":"user","content":"سلام"}],"stream":true}'
 ```
 
-### 11.8 `GET /api/keys` — کلیدها برای UI
+### 12.8 `GET /api/keys` — کلیدها برای UI
 
 وقتی `EXPOSE_KEYS=false` باشد، کلیدها ماسک برمی‌گردند:
 
@@ -564,7 +666,7 @@ curl -N https://<your-app>.up.railway.app/v1/messages \
   "exposed": false, "hint": "کلیدها در این استقرار مخفی‌اند (EXPOSE_KEYS=false)…" }
 ```
 
-### 11.9 Error Formats | فرمت خطاها
+### 12.9 Error Formats | فرمت خطاها
 
 | Source | Shape |
 |---|---|
@@ -574,7 +676,7 @@ curl -N https://<your-app>.up.railway.app/v1/messages \
 
 ---
 
-## 12. Security & Production Checklist | امنیت و چک‌لیست پروداکشن
+## 13. Security & Production Checklist | امنیت و چک‌لیست پروداکشن
 
 قبل از عمومی‌کردن سرویس این‌ها را انجام دهید:
 
@@ -589,13 +691,13 @@ curl -N https://<your-app>.up.railway.app/v1/messages \
 
 ---
 
-## 13. Verification | راستی‌آزمایی
+## 14. Verification | راستی‌آزمایی
 
 ### ۱) خودکار
 
 ```bash
 npm run lint          # ۰ خطا
-npm run typecheck     # ۰ خطا
+npm run typecheck     # ۰ خطا (نیاز به `npx prisma generate` دارد — اگر client ساخته نشده باشد خطای PrismaClient می‌گیرید)
 npm run build         # بیلد موفق + خروجی .next/standalone (~۳۶MB)
 npm run smoke         # ۷/۷ ✓ روی سرور در حال اجرا
 node --check app.js   # سینتکس نسخهٔ تک‌فایل سالم
@@ -622,9 +724,25 @@ node --check app.js   # سینتکس نسخهٔ تک‌فایل سالم
 - [ ] مودال ⚙️ → بخش 🔑: با `EXPOSE_KEYS=false` کلیدها ماسک و دکمهٔ کپی غیرفعال
 - [ ] موبایل 390px: هدر جمع‌شونده، همبرگر، تارگت 44px، کامپوزر چسبان
 
+### ۴) Cloudflare Workers / Pages
+
+```bash
+npm run cf:mock       # ترمینال ۱ — ماک آپستریم (بدون اینترنت)
+npm run cf:dev        # ترمینال ۲ — workerd روی ۸۷۸۷
+npm run cf:smoke      # ترمینال ۳ — ۷/۷ ✓
+OPENAI_API_KEY=sk-... npm run cf:test    # ۱۴/۱۴ ✓ (استریم زنده، رویدادهای Anthropic، abort)
+npm run cf:pages:build                   # باندل Pages → cloudflare/pages-dist/_worker.js
+```
+
+- [ ] `GET /healthz` → `runtime:"cloudflare-worker"` و `keysSource` ∈ {secret, kv, ephemeral}
+- [ ] `GET /` → HTML با کلید **ماسک‌شده** (چون `EXPOSE_KEYS` در Worker پیش‌فرض `false` است)
+- [ ] `POST /api/chat` → اولین تکهٔ SSE فوراً می‌رسد (نه بعد از پایان پاسخ) ← یعنی بافر نشده
+- [ ] Esc وسط استریم → در لاگ آپستریم/ماک «قطع شد» ثبت می‌شود (abort واقعاً propagate می‌شود)
+- [ ] بعد از `cf:deploy`: همان `npm run smoke -- --url https://…workers.dev` سبز شود
+
 ---
 
-## 14. Troubleshooting | رفع اشکال
+## 15. Troubleshooting | رفع اشکال
 
 | علامت | علت احتمالی | راه‌حل |
 |---|---|---|
@@ -641,7 +759,7 @@ node --check app.js   # سینتکس نسخهٔ تک‌فایل سالم
 
 ---
 
-## 15. Development History | تاریخچهٔ توسعه
+## 16. Development History | تاریخچهٔ توسعه
 
 | # | Task | خروجی کلیدی |
 |---|---|---|
@@ -656,9 +774,9 @@ node --check app.js   # سینتکس نسخهٔ تک‌فایل سالم
 
 ---
 
-## 16. Known Issues & Roadmap | مشکلات شناخته‌شده و نقشهٔ راه
+## 17. Known Issues & Roadmap | مشکلات شناخته‌شده و نقشهٔ راه
 
-### 16.1 Known Issues
+### 17.1 Known Issues
 
 1. **خطای موقت 429 آپستریم** («providers exhausted» / «Service temporarily overloaded»): رفتار سرویس رایگان است، نه باگ پروژه. هر دو نسخه آن را شفاف به حباب قرمز (UI) یا کد/فرمت استاندارد (API) تبدیل می‌کنند و retry پس از چند ثانیه معمولاً موفق است.
 2. **فرمت پاسخ آپستریم قفل به سبک OpenAI فعلی است.** پارسر `sse.ts` جهانی طراحی شده اما اگر آپستریم ساختارش را تغییر دهد، اولین نقطهٔ بررسی همین فایل است.
@@ -668,7 +786,7 @@ node --check app.js   # سینتکس نسخهٔ تک‌فایل سالم
 6. **دیتابیس Prisma اسکافلد استفاده‌نشده است** (`prisma/schema.prisma`، `src/lib/db.ts`، `db/custom.db`)؛ اگر هیچ‌وقت لازم نشد می‌توان حذفش کرد تا `npm ci` سبک‌تر شود.
 7. **ID واقعی مدل‌های GPT در سایت فقط `sol` و `terra` است** (کشف‌شده از باندل رسمی freemodels.pro)؛ alias سازگاری برای IDهای قدیمی و نام نمایشی حفظ شده است.
 
-### 16.2 Roadmap
+### 17.2 Roadmap
 
 - **Retry خودکار با backoff** برای 429 آپستریم در لایهٔ پروکسی.
 - **Rate limiting** برای `/api/chat` در استقرار عمومی.

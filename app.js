@@ -43,7 +43,8 @@ const path = require('path');
 const crypto = require('crypto');
 
 /* ---------- ثابت‌های آپستریم (پورت از src/lib/upstream.ts) ---------- */
-const UPSTREAM_URL = 'https://freemodels-chat.freemodels.workers.dev/';
+/* با UPSTREAM_URL قابل override است (مثلاً برای تست با cloudflare/mock-upstream.mjs) */
+const UPSTREAM_URL = (String(process.env.UPSTREAM_URL || '').trim()) || 'https://freemodels-chat.freemodels.workers.dev/';
 const MAX_BODY_BYTES = 5 * 1024 * 1024; // حداکثر حجم بدنهٔ درخواست: ۵ مگابایت
 const UPSTREAM_TIMEOUT_MS = 180 * 1000; // تایم‌اوت آپستریم: ۱۸۰ ثانیه
 
@@ -112,11 +113,20 @@ function resolveModelId(input) {
    اولین اجرا: ساخته و در api-keys.json کنار همین فایل ذخیره می‌شود؛
    اجراهای بعدی همان‌ها لود می‌شوند. با env هم قابل تعیین دستی است:
    OPENAI_API_KEY / ANTHROPIC_API_KEY */
-const KEY_FILE = process.env.API_KEYS_FILE
-  ? (path.isAbsolute(process.env.API_KEYS_FILE)
-      ? process.env.API_KEYS_FILE
-      : path.resolve(__dirname, process.env.API_KEYS_FILE))
-  : path.join(__dirname, 'api-keys.json');
+/* نکته: __dirname در باندل Cloudflare Worker وجود ندارد؛ پس با try/catch محافظت می‌شود
+   (در Worker اصلاً به فایل کلیدها نمی‌رسیم — کلیدها از Secret/KV می‌آیند). */
+const KEY_FILE = (() => {
+  try {
+    const base = typeof __dirname === 'string' ? __dirname : '.';
+    return process.env.API_KEYS_FILE
+      ? (path.isAbsolute(process.env.API_KEYS_FILE)
+          ? process.env.API_KEYS_FILE
+          : path.resolve(base, process.env.API_KEYS_FILE))
+      : path.join(base, 'api-keys.json');
+  } catch (e) {
+    return 'api-keys.json';
+  }
+})();
 
 /** آیا کلیدها در UI/بنر نمایش داده شوند؟ (EXPOSE_KEYS=false → ماسک) */
 function keysExposed() {
@@ -189,11 +199,19 @@ function loadOrCreateKeys() {
   return { openai: fresh.openai, anthropic: fresh.anthropic };
 }
 
-const API_KEYS = loadOrCreateKeys();
+/* تنبل (lazy): کلیدها فقط وقتی لازم شوند خوانده/ساخته می‌شوند.
+   چرا؟ چون cloudflare/worker.mjs این فایل را import می‌کند و در Worker نه fs هست
+   نه باید کلید تصادفی در لاگ‌ها چاپ شود — آنجا کلیدها از Secret/KV می‌آیند. */
+let _API_KEYS = null;
+function getApiKeys() {
+  if (!_API_KEYS) _API_KEYS = loadOrCreateKeys();
+  return _API_KEYS;
+}
 
 /** اعتبارسنجی کلید — هر دو کلید روی هر دو اندپوینت پذیرفته می‌شوند */
 function keyIsValid(k) {
-  return !!k && (k === API_KEYS.openai || k === API_KEYS.anthropic);
+  const K = getApiKeys();
+  return !!k && (k === K.openai || k === K.anthropic);
 }
 
 /* ---------- لاگ رنگی ANSI کنسول ---------- */
@@ -2005,16 +2023,22 @@ if (document.readyState === 'loading') {
    صفحهٔ HTML (ترکیب CSS و JS بالا)
    ═══════════════════════════════════════════════════════════════════════════ */
 /* دیتای تزریق‌شده به کلاینت (مدل‌ها + کلیدهای API برای بخش ⚙️ تنظیمات) */
+function serverDataJson(keys, exposed) {
+  return JSON.stringify({
+    models: FM_MODELS,
+    defaultModel: DEFAULT_MODEL_ID,
+    openaiKey: exposed ? keys.openai : maskKey(keys.openai),
+    anthropicKey: exposed ? keys.anthropic : maskKey(keys.anthropic),
+    keysExposed: exposed,
+  });
+}
 const KEYS_EXPOSED = keysExposed();
-const SERVER_DATA_JSON = JSON.stringify({
-  models: FM_MODELS,
-  defaultModel: DEFAULT_MODEL_ID,
-  openaiKey: KEYS_EXPOSED ? API_KEYS.openai : maskKey(API_KEYS.openai),
-  anthropicKey: KEYS_EXPOSED ? API_KEYS.anthropic : maskKey(API_KEYS.anthropic),
-  keysExposed: KEYS_EXPOSED,
-});
 
-const PAGE_HTML = `<!DOCTYPE html>
+/* سازندهٔ HTML صفحه.
+   چرا تابع و نه ثابت؟ تا نسخهٔ Cloudflare Worker (cloudflare/worker.mjs) بتواند همان
+   UI را با کلیدهای زمان‌اجرا (Secret/KV) سرو کند بدون اینکه کلیدها در بیلد baked شوند. */
+function buildPageHtml(serverData) {
+  return `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8">
@@ -2142,22 +2166,36 @@ ${PAGE_CSS}
 
 </div>
 <script>
-window.__FM__ = ${SERVER_DATA_JSON};
+window.__FM__ = ${serverData};
 </script>
 <script>
 ${PAGE_JS}
 </script>
 </body>
 </html>`;
+}
+
+/* نسخهٔ آمادهٔ Node (memoized) — کلیدها از env یا api-keys.json خوانده می‌شوند.
+   نسخهٔ Worker خودش buildPageHtml را با کلیدهای زمان‌اجرا (Secret/KV) صدا می‌زند. */
+let _PAGE_HTML = null;
+function pageHtml() {
+  if (_PAGE_HTML === null) _PAGE_HTML = buildPageHtml(serverDataJson(getApiKeys(), KEYS_EXPOSED));
+  return _PAGE_HTML;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    سرور HTTP — روت‌ها و پروکسی آپستریم
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/** ماژول درست بر اساس پروتکل UPSTREAM_URL (http فقط برای تست با mock محلی) */
+function httpModuleFor(url) {
+  return /^http:\/\//i.test(String(url)) ? http : https;
+}
+
 /** باز کردن درخواست POST به آپستریم با هدرهای جعلی؛ همان لحظهٔ رسیدن هدرها resolve می‌شود */
 function openUpstream(body, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const req = https.request(
+    const req = httpModuleFor(UPSTREAM_URL).request(
       UPSTREAM_URL,
       {
         method: 'POST',
@@ -2214,8 +2252,9 @@ function sendJson(res, status, obj) {
 /** GET / — صفحهٔ چت */
 function handleHome(res) {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-  res.end(PAGE_HTML);
-  logReq('green', 'GET / → 200 HTML (' + Buffer.byteLength(PAGE_HTML, 'utf8') + ' bytes)');
+  const html = pageHtml();
+  res.end(html);
+  logReq('green', 'GET / → 200 HTML (' + Buffer.byteLength(html, 'utf8') + ' bytes)');
 }
 
 /* ---------- POST /api/chat — پروکسی استریم ---------- */
@@ -2357,7 +2396,7 @@ function handlePing(res) {
     stream: false,
   });
 
-  const upReq = https.request(
+  const upReq = httpModuleFor(UPSTREAM_URL).request(
     UPSTREAM_URL,
     {
       method: 'POST',
@@ -3087,7 +3126,17 @@ function handleHealthz(res, headOnly) {
   res.end(headOnly ? undefined : body);
 }
 
-const server = http.createServer((req, res) => {
+/* ── آیا این فایل «مستقیماً» اجرا شده (node app.js) یا فقط import شده است؟
+   نسخهٔ Cloudflare Worker (cloudflare/worker.mjs) همین فایل را import می‌کند تا از
+   UI/مدل‌ها/پارسر SSE استفاده کند؛ در آن حالت هیچ سرور Node بالا نمی‌آید. ── */
+const RUN_AS_SERVER =
+  typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module;
+
+/* هندلر به‌صورت «تابع» تعریف می‌شود (نه اینکه همین‌جا createServer صدا زده شود):
+   وقتی cloudflare/worker.mjs این فایل را import می‌کند، نباید حتی یک‌بار هم
+   node:http لمس شود — باندلر Pages آن را با unenv جایگزین می‌کند و createServer
+   در unenv پیاده‌سازی نشده (خطا: "http.createServer is not implemented yet!"). */
+function handleNodeRequest(req, res) {
   const path = (req.url || '/').split('?')[0];
 
   /* هر OPTIONS → 204 با CORS باز */
@@ -3152,19 +3201,24 @@ const server = http.createServer((req, res) => {
   res.writeHead(404, Object.assign({ 'Content-Type': 'text/plain; charset=utf-8' }, OPEN_CORS));
   res.end('404 — مسیر یافت نشد');
   logReq('yellow', req.method + ' ' + path + ' → 404');
-});
+}
 
-/* مقاوم‌سازی: هیچ خطایی نباید پروسه را بیندازد */
-process.on('uncaughtException', (err) => logReq('red', 'uncaughtException: ' + ((err && err.message) || err)));
-process.on('unhandledRejection', (err) => logReq('red', 'unhandledRejection: ' + ((err && err.message) || err)));
+/* ── فقط وقتی مستقیماً اجرا شده باشد: سرور + هندلرهای خطا + بنر ── */
+if (RUN_AS_SERVER) {
+  const server = http.createServer(handleNodeRequest);
 
-/* ---------- بنر خوش‌آمد رنگی ---------- */
-server.listen(PORT, HOST, () => {
+  /* مقاوم‌سازی: هیچ خطایی نباید پروسه را بیندازد */
+  process.on('uncaughtException', (err) => logReq('red', 'uncaughtException: ' + ((err && err.message) || err)));
+  process.on('unhandledRejection', (err) => logReq('red', 'unhandledRejection: ' + ((err && err.message) || err)));
+
+  /* ---------- بنر خوش‌آمد رنگی ---------- */
+  server.listen(PORT, HOST, () => {
   const line = '─'.repeat(52);
   console.log('');
   console.log(C.dim + '┌' + line + '┐' + C.reset);
   console.log('  \x1b[1;36m⚡ چت هوشمند\x1b[0m — \x1b[1;37mنسخهٔ تک‌فایل Node.js\x1b[0m');
   console.log(C.dim + '└' + line + '┘' + C.reset);
+  const K = getApiKeys();
   const localHost = (HOST === '0.0.0.0' || HOST === '::') ? '127.0.0.1' : HOST;
   console.log('   \x1b[32m●\x1b[0m آدرس محلی : \x1b[1;34mhttp://' + localHost + ':' + PORT + '/\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m bind       : \x1b[33m' + HOST + ':' + PORT + '\x1b[0m \x1b[2m(متغیرهای محیطی HOST و PORT)\x1b[0m');
@@ -3176,13 +3230,52 @@ server.listen(PORT, HOST, () => {
   console.log('   \x1b[32m●\x1b[0m زمان شروع : \x1b[2m' + new Date().toLocaleString('en-GB') + '\x1b[0m');
   console.log('');
   if (KEYS_EXPOSED) {
-    console.log('   \x1b[1;33m🔑 کلید OpenAI   (Authorization: Bearer):\x1b[0m ' + API_KEYS.openai);
-    console.log('   \x1b[1;33m🔑 کلید Anthropic (x-api-key):\x1b[0m           ' + API_KEYS.anthropic);
+    console.log('   \x1b[1;33m🔑 کلید OpenAI   (Authorization: Bearer):\x1b[0m ' + K.openai);
+    console.log('   \x1b[1;33m🔑 کلید Anthropic (x-api-key):\x1b[0m           ' + K.anthropic);
   } else {
-    console.log('   \x1b[1;33m🔑 کلید OpenAI   (Authorization: Bearer):\x1b[0m ' + maskKey(API_KEYS.openai) + '  \x1b[2m(ماسک‌شده: EXPOSE_KEYS=false)\x1b[0m');
-    console.log('   \x1b[1;33m🔑 کلید Anthropic (x-api-key):\x1b[0m           ' + maskKey(API_KEYS.anthropic) + '  \x1b[2m(ماسک‌شده: EXPOSE_KEYS=false)\x1b[0m');
+    console.log('   \x1b[1;33m🔑 کلید OpenAI   (Authorization: Bearer):\x1b[0m ' + maskKey(K.openai) + '  \x1b[2m(ماسک‌شده: EXPOSE_KEYS=false)\x1b[0m');
+    console.log('   \x1b[1;33m🔑 کلید Anthropic (x-api-key):\x1b[0m           ' + maskKey(K.anthropic) + '  \x1b[2m(ماسک‌شده: EXPOSE_KEYS=false)\x1b[0m');
   }
   console.log('   \x1b[2mفایل کلیدها: ' + KEY_FILE + '\x1b[0m');
   console.log('');
   logReq('green', 'سرور روی ' + HOST + ':' + PORT + ' آماده است ✓');
-});
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   exports — برای cloudflare/worker.mjs (نسخهٔ Cloudflare Workers/Pages)
+   همهٔ بخش‌های «خالص» (بدون fs/http) اینجا صادر می‌شوند تا منطق UI، مدل‌ها،
+   پارسر SSE و تبدیل payload بین Node و Worker یکسان بماند (single source of truth).
+   ═══════════════════════════════════════════════════════════════════════════ */
+module.exports = {
+  /* UI */
+  buildPageHtml,
+  serverDataJson,
+  pageHtml,
+  PAGE_CSS,
+  PAGE_JS,
+  EMBEDDED_LOGOS,
+  /* مدل‌ها */
+  FM_MODELS,
+  DEFAULT_MODEL_ID,
+  LEGACY_MODEL_ALIASES,
+  BOOT_AT,
+  resolveModelId,
+  /* آپستریم */
+  UPSTREAM_URL,
+  UPSTREAM_TIMEOUT_MS,
+  MAX_BODY_BYTES,
+  SPOOFED_HEADERS,
+  OPEN_CORS,
+  /* پارسر/تبدیل‌ها */
+  makeUpstreamParser,
+  collectUpstreamText,
+  flattenContent,
+  /* کلیدها */
+  getApiKeys,
+  maskKey,
+  randomToken,
+  isUsableKey,
+  keyIsValid,
+  keysExposed,
+};

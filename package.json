@@ -11,6 +11,14 @@
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke.mjs",
     "keys:generate": "node scripts/generate-keys.mjs",
+    "cf:dev": "wrangler dev --config cloudflare/wrangler.jsonc --ip 0.0.0.0 --port 8787",
+    "cf:deploy": "wrangler deploy --config cloudflare/wrangler.jsonc",
+    "cf:tail": "wrangler tail --config cloudflare/wrangler.jsonc",
+    "cf:mock": "node cloudflare/mock-upstream.mjs",
+    "cf:test": "node cloudflare/tests/stream.test.mjs",
+    "cf:smoke": "node scripts/smoke.mjs --url http://127.0.0.1:8787",
+    "cf:pages:build": "node cloudflare/pages-build.mjs",
+    "cf:pages:deploy": "npm run cf:pages:build && wrangler pages deploy cloudflare/pages-dist --project-name smart-chat",
     "docker:build": "docker build -t smart-chat:latest .",
     "docker:build:single": "docker build -f Dockerfile.single -t smart-chat-single:latest .",
     "docker:run": "docker run --rm -p 3000:3000 smart-chat:latest",
@@ -97,6 +105,7 @@
     "eslint-config-next": "^16.1.1",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.5",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.131.1"
   }
 }

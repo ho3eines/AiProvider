@@ -51,7 +51,8 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "off",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills", "app.js", "scripts/**", "download/**"]
+  // `cloudflare/pages-dist/**` و `.wrangler/**` خروجی باندل wrangler هستند (نه کد دستی)
+  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills", "app.js", "scripts/**", "download/**", "cloudflare/pages-dist/**", ".wrangler/**", "cloudflare/.wrangler/**", "cloudflare/.bundle-tmp/**"]
 }];
 
 export default eslintConfig;

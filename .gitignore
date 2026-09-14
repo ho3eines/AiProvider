@@ -62,3 +62,12 @@ api-keys.json
 docker-compose.override.yml
 # لاگ/خروجی ابزارهای کمکی
 .zscripts/dev.pid
+
+# ── Cloudflare Workers / Pages ──
+# رازهای محلی wrangler dev
+cloudflare/.dev.vars
+.dev.vars
+# کش/خروجی wrangler
+.wrangler/
+cloudflare/.bundle-tmp/
+cloudflare/pages-dist/
