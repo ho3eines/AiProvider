@@ -249,3 +249,23 @@ Work Log:
 Stage Summary:
 - علت قطعی: ID های حدسی gpt-5.6-* → fallback خاموش آپستریم به Claude؛ فیکس: ID های واقعی sol/terra + alias سازگاری در هر دو نسخه — کلاینت‌های فعلی با ID قدیمی هم درست کار می‌کنند
 - ابزار ماندگار: scripts/probe_identity.py (پروب هویت) و scripts/_probe/extract_models.py (استخراج لیست واقعی سایت)
+
+---
+Task ID: 13
+Agent: Arena.ai Agent Mode
+Task: درخواست کاربر («نمیشه این تغییرات رو روی Cloudflare Worker یا Pages بالا آورد؟») — ساخت نسخهٔ Cloudflare Workers/Pages از همان اپ
+
+Work Log:
+- امکان‌سنجی عملی با probe worker روی workerd: `node:http/https/fs/crypto/stream/buffer` با فلگ `nodejs_compat` ایمپورت می‌شوند ✓ · `Buffer` و `process.version` هست ✓ · `fetch` از Worker به `127.0.0.1` کار می‌کند (egress عمومیِ سندباکس بسته بود، پس تست‌ها با ماک محلی انجام شد)
+- طراحی: به‌جای بازنویسی UI، `cloudflare/worker.mjs` بخش‌های خالص را از `app.js` ایمپورت می‌کند (buildPageHtml/serverDataJson/EMBEDDED_LOGOS/FM_MODELS/resolveModelId/SPOOFED_HEADERS/OPEN_CORS/makeUpstreamParser/collectUpstreamText/flattenContent/maskKey/isUsableKey) → single source of truth
+- تغییرات import-safe در `app.js`: ۱) `buildPageHtml(serverData)` تابع شد (کلیدها در بیلد bake نشوند) ۲) `getApiKeys()`/`pageHtml()` تنبل شدند (در Worker نه fs لمس شود نه کلید تصادفی در لاگ چاپ شود) ۳) `KEY_FILE` با try/catch و بدون اتکا به `__dirname` ۴) `RUN_AS_SERVER = require.main === module` و انتقال `http.createServer`/`process.on`/`listen`/بنر داخل آن ۵) `module.exports` برای Worker ۶) `UPSTREAM_URL` از env + انتخاب `http`/`https` بر اساس پروتکل
+- ساخت `cloudflare/worker.mjs` (~۹۵۰ خط): روتر Fetch API، `openUpstream` با fetch + AbortController (تایم‌اوت ۱۸۰s + propagate شدن `req.signal`)، پاس‌دادن مستقیم استریم در `/api/chat`، هندلرهای `/api/ping`، `/healthz`، لوگوهای base64، `/v1/models`، `/v1/chat/completions` و `/v1/messages` (استریم + غیراستریم) با ReadableStream
+- کلیدها در Worker: Secret ← KV (بایندینگ `API_KEYS`) ← تصادفی موقتی؛ `/healthz` فیلد `keysSource` را برمی‌گرداند؛ `EXPOSE_KEYS` پیش‌فرض `false`
+- ساخت ابزار تست: `cloudflare/mock-upstream.mjs` (SSE با `@error`/`@empty`/`@slow`) · `cloudflare/tests/stream.test.mjs` (۱۴ تست: زنده‌بودن استریم با معیار first-chunk، رویدادهای Anthropic، `usage`، `reasoning_content`، پاس‌دادن خطا، abort) · `cloudflare/pages-build.mjs`
+- باگ‌هایی که حین راستی‌آزمایی پیدا و فیکس شد: ۱) `Date.now()` در workerd هنگام ارزیابی ماژول **صفر** است → `uptimeSec` مقدار 1789335851 می‌داد؛ با `isolateAgeSec()`/`modelsCreatedAt()` تنبل فیکس شد ۲) `wrangler pages dev` دوباره باندل می‌کند و `node:*` را با `unenv` جایگزین می‌کند → `http.createServer is not implemented yet!`؛ با انتقال `createServer` داخل `RUN_AS_SERVER` حل شد ۳) `--outdir` نسبی در wrangler نسبت به دایرکتوری کانفیگ حل می‌شود → مسیر مطلق در pages-build ۴) در ماک، `req.on('close')` به‌محض پایان بدنه شلیک می‌شد (باید `res.on('close')` + `!res.writableFinished`)
+- مستندات: `cloudflare/README.md` (راهنمای کامل) · بخش جدید ۷ در README (شمارهٔ بخش‌های ۷–۱۶ به ۸–۱۷ منتقل شد + ToC) · جدول env (UPSTREAM_URL/EXPOSE_KEYS) · بخش ۱۴.۴ راستی‌آزمایی · HANDOFF (سه نسخه + نکات بحرانی ۱۸–۲۳) · `.gitignore` (`.dev.vars`, `.wrangler/`, `pages-dist/`) · اسکریپت‌های `cf:*` در package.json + `wrangler` در devDependencies
+
+Stage Summary:
+- راستی‌آزمایی واقعی: باندل `wrangler deploy --dry-run` = ۱۸۴.۳۸ KiB خام / ۵۳.۷۲ KiB gzip ✓ · `scripts/smoke.mjs` روی `wrangler dev` ۷/۷ ✓ · `cloudflare/tests/stream.test.mjs` روی Workers ۱۴/۱۴ ✓ · روی `wrangler pages dev` ۱۴/۱۴ ✓ · روی `node app.js` همهٔ تست‌های عملکردی ✓ (فقط برچسب `runtime` متفاوت) · `npm run lint` ۰ خطا ۰ هشدار ✓
+- اثبات استریم زنده: ۲۲ فریم SSE در ۸.۴ ثانیه با اولین تکه در ۰ms (یعنی بافر نمی‌شود)؛ هدرهای جعلی (`origin=https://freemodels.pro`) در لاگ ماک دیده شد
+- آنچه در این سندباکس ممکن نبود: دیپلوی واقعی (`wrangler login`/OAuth و egress عمومی بسته است) و `npm run typecheck` کامل (چون `prisma generate` باید engine دانلود کند) — هیچ‌کدام به تغییرات این تسک مربوط نیستند

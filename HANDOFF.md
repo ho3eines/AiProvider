@@ -8,7 +8,7 @@
 
 ## 1. TL;DR | خلاصهٔ تحویل
 
-**چت هوشمند** یک اپ چت AI فارسی (RTL، تم تاریک) متصل به سرویس رایگان freemodels است که در قالب **دو نسخهٔ معادل** تحویل می‌شود: (۱) اپ Next.js 16 در `src/` و (۲) فایل تک‌فایل Node خالص `app.js` بدون هیچ وابستگی. هر دو نسخه UI چت کامل + پروکسی استریم آپستریم + **سه اندپوینت API سازگار OpenAI/Anthropic** با کلیدهای محلی (`api-keys.json`) دارند. همه‌چیز تست شده و کار می‌کند؛ تنها مشکل شناخته‌شده، خطای موقت 429 سهمیهٔ خود سرویس رایگان است که به‌درستی به کاربر نشان داده می‌شود.
+**چت هوشمند** یک اپ چت AI فارسی (RTL، تم تاریک) متصل به سرویس رایگان freemodels است که در قالب **سه نسخهٔ معادل** تحویل می‌شود: (۱) اپ Next.js 16 در `src/`، (۲) فایل تک‌فایل Node خالص `app.js` بدون هیچ وابستگی، و (۳) **نسخهٔ Cloudflare Workers/Pages** در `cloudflare/worker.mjs` که UI/مدل‌ها/پارسر SSE را مستقیماً از `app.js` ایمپورت می‌کند. هر سه نسخه UI چت کامل + پروکسی استریم آپستریم + **سه اندپوینت API سازگار OpenAI/Anthropic** دارند (کلیدها: `api-keys.json` در Node، Secret/KV در Cloudflare). همه‌چیز تست شده و کار می‌کند؛ تنها مشکل شناخته‌شده، خطای موقت 429 سهمیهٔ خود سرویس رایگان است که به‌درستی به کاربر نشان داده می‌شود.
 
 **دستورهایی که همه‌چیز را راه می‌اندازد:**
 
@@ -22,9 +22,16 @@ npm run keys:generate        # کلیدهای پایدار برای Railway Vari
 docker build -t smart-chat . && docker run --rm -p 3000:3000 smart-chat
 railway up && railway domain # دیپلوی + دامنهٔ عمومی (railway.json بیلدر را روی Dockerfile قفل کرده)
 npm run smoke -- --url https://<your-app>.up.railway.app   # راستی‌آزمایی بعد از دیپلوی
+
+# استقرار (Cloudflare Workers / Pages) — راهنمای کامل: cloudflare/README.md
+npm run cf:mock       # ماک آپستریم برای تست آفلاین (۱۲۷.۰.۰.۱:۹۹۱۲)
+npm run cf:dev        # workerd محلی → http://127.0.0.1:8787
+npm run cf:deploy     # دیپلوی → https://smart-chat.<subdomain>.workers.dev
+OPENAI_API_KEY=sk-... npm run cf:test   # ۱۴ تست (استریم واقعی) روی Workers یا Pages
+npm run cf:pages:build && npm run cf:pages:deploy   # مسیر Pages
 ```
 
-**چهار دستور سلامت کد:** `npm run lint` (۰ خطا) · `npm run typecheck` (۰ خطا) · `npm run build` · `npm run smoke` (۷/۷).
+**دستورهای سلامت کد:** `npm run lint` (۰ خطا) · `npm run typecheck` (۰ خطا — بعد از `npx prisma generate`) · `npm run build` · `npm run smoke` (۷/۷) · `npm run cf:test` (۱۴/۱۴ روی Workers و Pages).
 
 ## 2. Where Things Live | نقشهٔ مسیرها
 
@@ -40,6 +47,8 @@ npm run smoke -- --url https://<your-app>.up.railway.app   # راستی‌آزم
 | لیست مدل‌ها (منبع واحد) | `src/lib/models.ts` (Next) + ثابت `FM_MODELS` در app.js |
 | کلیدها | `api-keys.json` (ignore شده — الگو: `api-keys.example.json`) + `src/lib/apikeys.ts` / `loadOrCreateKeys()` در app.js + env |
 | **استقرار** | `Dockerfile` (Next) · `Dockerfile.single` (app.js) · `.dockerignore` · `railway.json` · `docker-compose.yml` · `.env.example` |
+| **استقرار Cloudflare** | `cloudflare/worker.mjs` (Worker) · `cloudflare/wrangler.jsonc` · `cloudflare/pages-build.mjs` (خروجی `_worker.js` برای Pages) · `cloudflare/.dev.vars.example` · `cloudflare/README.md` |
+| **تست Cloudflare** | `cloudflare/mock-upstream.mjs` (ماک آپستریم) · `cloudflare/tests/stream.test.mjs` (۱۴ تست استریم) |
 | **ابزارهای کمکی** | `scripts/finalize-standalone.mjs` (کپی assets) · `scripts/generate-keys.mjs` (کلید پایدار) · `scripts/smoke.mjs` (تست دود) |
 | UI چت (تک‌فایل) | `app.js`: `PAGE_CSS` · `PAGE_JS` · `PAGE_HTML` · هندلرهای سرور (خط ~۳۰۴۰ به بعد) |
 | لوگوها | `public/` (۴ فایل واقعی) + base64 در `EMBEDDED_LOGOS` · ابزار: `scripts/embed_logos.py` |
@@ -71,6 +80,15 @@ npm run smoke -- --url https://<your-app>.up.railway.app   # راستی‌آزم
 15. **مسیر پویای `API_KEYS_FILE` در `src/lib/apikeys.ts` با `/* turbopackIgnore: true */` علامت‌گذاری شده** — اگر آن را برداری، Turbopack کل پروژه را داخل standalone trace می‌کند (حجم دیپلوی چند برابر می‌شود).
 16. **`typescript.ignoreBuildErrors` خاموش است** — بیلد حالا خطای تایپ را قبول نمی‌کند؛ قبل از push حتماً `npm run typecheck` بزن.
 17. **رازها داخل تصویر bake نمی‌شوند:** `.dockerignore` فایل‌های `.env*` و `api-keys.json` را بیرون نگه می‌دارد؛ این دو را از `.dockerignore` خارج نکن.
+
+**نکته‌های بحرانی Cloudflare Workers/Pages:**
+
+18. **`app.js` را «import-safe» نگه دار:** هیچ کد سطح‌ماژولی نباید `node:http`/`node:fs` را *صدا* بزند. `http.createServer` فقط داخل `if (RUN_AS_SERVER)` است و کلیدها با `getApiKeys()` تنبل لود می‌شوند. وگرنه باندلر Pages (که `node:*` را با `unenv` جایگزین می‌کند) موقع بالا آمدن می‌میرد: `http.createServer is not implemented yet!`.
+19. **`Date.now()` در زمان ارزیابی ماژولِ workerd صفر است** — هر زمان/سن را داخل هندلر درخواست محاسبه کن (`isolateAgeSec()` و `modelsCreatedAt()` در `cloudflare/worker.mjs`).
+20. **`EXPOSE_KEYS` در Worker پیش‌فرض `false` است** (برعکس Node) — چون دیپلوی کلودفلر عملاً همیشه عمومی است. کلیدها هرگز در بیلد bake نمی‌شوند؛ `buildPageHtml()` با کلیدهای زمان‌اجرا صدا زده می‌شود.
+21. **کلیدها: Secret ← KV ← تصادفی موقتی.** بدون `wrangler secret put OPENAI_API_KEY/ANTHROPIC_API_KEY` هر ایزوله کلید تازه می‌سازد و کلاینت‌ها بعد از مدتی 401 می‌گیرند. `GET /healthz` فیلد `keysSource` را نشان می‌دهد.
+22. **هدرهای ممنوعه در Workers:** `Content-Length` و `Accept-Encoding` را دستی ست نکن؛ و از پاسخ آپستریم `access-control-*`/`transfer-encoding`/`content-encoding`/`content-length`/`connection` را حذف کن (وگرنه ساخت `Response` خطا می‌دهد).
+23. **فلگ `nodejs_compat` اجباری است** — در `cloudflare/wrangler.jsonc` ست شده؛ برای Pages باید در Settings ▸ Functions یا با `--compatibility-flags=nodejs_compat` داده شود. در `wrangler pages dev` بایندینگ‌ها با `--binding KEY=VALUE` داده می‌شوند (نه `--var`).
 
 ## 4. Frontend ↔ Backend Contract | قرارداد فرانت-بک
 
