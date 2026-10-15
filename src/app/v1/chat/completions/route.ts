@@ -1,9 +1,5 @@
 /**
- * POST /v1/chat/completions — اندپوینت سازگار OpenAI
- * • احراز هویت: Authorization: Bearer <key> (کلیدهای api-keys.json)
- * • استریم (SSE به سبک OpenAI + [DONE]) و غیراستریم (chat.completion)
- * • پاسخ آپستریم با پارسر جهانی (src/lib/sse.ts) به فرمت OpenAI تبدیل می‌شود
- * • اکستنشن‌های اختیاری غیراستاندارد: thinking ، deep_search
+ * POST /v1/chat/completions — اندپوینت سازگار OpenAI با پشتیبانی کامل از Tool Calling (مخصوص Codex / Cursor)
  */
 import { randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
@@ -11,7 +7,16 @@ import { openUpstream, UPSTREAM_TIMEOUT_MS } from '@/lib/upstream';
 import { createSseParser } from '@/lib/sse';
 import { resolveModelId } from '@/lib/models';
 import { bearerFrom, getApiKeys, keyIsValid } from '@/lib/apikeys';
-import { estTokens, flattenContent, readAll, SSE_HEADERS, V1_CORS } from '@/lib/v1';
+import {
+  buildToolSystemPrompt,
+  buildUpstreamMessages,
+  createStreamingToolFilter,
+  estTokens,
+  extractToolCalls,
+  readAll,
+  SSE_HEADERS,
+  V1_CORS,
+} from '@/lib/v1';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,7 +40,8 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   const keys = getApiKeys();
-  if (!keyIsValid(bearerFrom(req.headers.get('authorization')), keys)) {
+  const key = bearerFrom(req.headers.get('authorization')) || (req.headers.get('x-api-key') || '').trim();
+  if (!keyIsValid(key, keys)) {
     return jsonError(401, 'کلید API نامعتبر است (هدر Authorization: Bearer).', 'invalid_api_key');
   }
 
@@ -46,15 +52,10 @@ export async function POST(req: NextRequest) {
     return jsonError(400, 'بدنهٔ JSON نامعتبر است.');
   }
 
-  /* پیام‌ها → فرمت آپستریم (نقش‌های ناشناخته → user) */
-  const msgsIn = Array.isArray(parsed.messages) ? (parsed.messages as Record<string, unknown>[]) : [];
-  const upstreamMsgs: { role: string; content: string }[] = [];
-  for (const m of msgsIn) {
-    if (!m || typeof m !== 'object') continue;
-    const role = m.role === 'assistant' || m.role === 'system' ? String(m.role) : 'user';
-    const content = flattenContent(m.content);
-    if (content) upstreamMsgs.push({ role, content });
-  }
+  const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0 && parsed.tool_choice !== 'none';
+  const toolsPrompt = hasTools ? buildToolSystemPrompt(parsed.tools, parsed.tool_choice) : '';
+  const upstreamMsgs = buildUpstreamMessages(parsed.messages, undefined, toolsPrompt);
+
   if (!upstreamMsgs.length) {
     return jsonError(400, 'messages باید آرایه‌ای غیرخالی از پیام‌ها باشد.');
   }
@@ -64,8 +65,8 @@ export async function POST(req: NextRequest) {
   const payload = JSON.stringify({
     messages: upstreamMsgs,
     modelId: model,
-    thinking: parsed.thinking === true, // اکستنشن غیراستاندارد (اختیاری)
-    deepSearch: parsed.deep_search === true, // اکستنشن غیراستاندارد (اختیاری)
+    thinking: parsed.thinking === true,
+    deepSearch: parsed.deep_search === true,
     stream: wantStream,
   });
 
@@ -73,7 +74,6 @@ export async function POST(req: NextRequest) {
   const created = Math.floor(Date.now() / 1000);
   const estIn = estTokens(upstreamMsgs.reduce((n, m) => n + m.content.length, 0));
 
-  /* اتصال به آپستریم */
   let up;
   try {
     up = await openUpstream(payload, UPSTREAM_TIMEOUT_MS);
@@ -100,8 +100,31 @@ export async function POST(req: NextRequest) {
     });
     parser.feed(full);
     parser.end();
-    const content = acc.text || acc.reasoning || '⚠️ پاسخ خالی از سرور دریافت شد.';
-    const estOut = estTokens(content.length);
+
+    const { cleanText, toolCalls } = hasTools
+      ? extractToolCalls(acc.text, 'call_')
+      : { cleanText: acc.text, toolCalls: [] };
+
+    const content =
+      cleanText || (toolCalls.length ? null : acc.reasoning || '⚠️ پاسخ خالی از سرور دریافت شد.');
+    const estOut = estTokens(acc.text.length);
+
+    const messageObj: Record<string, unknown> = {
+      role: 'assistant',
+      content,
+    };
+    if (acc.reasoning) messageObj.reasoning_content = acc.reasoning;
+    if (toolCalls.length > 0) {
+      messageObj.tool_calls = toolCalls.map((tc) => ({
+        id: tc.id,
+        type: 'function',
+        function: {
+          name: tc.name,
+          arguments: JSON.stringify(tc.input || {}),
+        },
+      }));
+    }
+
     return NextResponse.json(
       {
         id,
@@ -111,9 +134,9 @@ export async function POST(req: NextRequest) {
         choices: [
           {
             index: 0,
-            message: { role: 'assistant', content },
+            message: messageObj,
             logprobs: null,
-            finish_reason: 'stop',
+            finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
           },
         ],
         usage: { prompt_tokens: estIn, completion_tokens: estOut, total_tokens: estIn + estOut },
@@ -129,6 +152,7 @@ export async function POST(req: NextRequest) {
   let outChars = 0;
   let gotText = false;
   let gotReasoning = false;
+  let toolCallIdx = 0;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -153,9 +177,42 @@ export async function POST(req: NextRequest) {
             }) +
             '\n\n',
         );
+
+      const toolFilter = createStreamingToolFilter({
+        idPrefix: 'call_',
+        onText: (txt) => {
+          if (!txt) return;
+          gotText = true;
+          outChars += txt.length;
+          chunk({ content: txt });
+        },
+        onToolCall: (call) => {
+          const idx = toolCallIdx++;
+          const argsStr = JSON.stringify(call.input || {});
+          outChars += argsStr.length;
+          chunk({
+            tool_calls: [
+              {
+                index: idx,
+                id: call.id,
+                type: 'function',
+                function: {
+                  name: call.name,
+                  arguments: argsStr,
+                },
+              },
+            ],
+          });
+        },
+      });
+
       const endStream = () => {
         if (closed) return;
-        chunk({}, 'stop');
+        if (hasTools) toolFilter.flush();
+        if (!gotText && !gotReasoning && toolCallIdx === 0) {
+          chunk({ content: '⚠️ پاسخ خالی از سرور دریافت شد.' });
+        }
+        chunk({}, toolCallIdx > 0 ? 'tool_calls' : 'stop');
         if (includeUsage) {
           const estOut = estTokens(outChars);
           send(
@@ -191,22 +248,23 @@ export async function POST(req: NextRequest) {
             chunk({ reasoning_content: ev.reasoning });
           }
           if (ev.text) {
-            gotText = true;
-            outChars += ev.text.length;
-            chunk({ content: ev.text });
+            if (hasTools) toolFilter.push(ev.text);
+            else {
+              gotText = true;
+              outChars += ev.text.length;
+              chunk({ content: ev.text });
+            }
           }
         },
       });
 
-      chunk({ role: 'assistant', content: '' }); // چانک اول: نقش
+      chunk({ role: 'assistant', content: '' });
       up.res.on('data', (c) => parser.feed(c.toString('utf8')));
       up.res.on('end', () => {
         parser.end();
-        if (!gotText && !gotReasoning) chunk({ content: '⚠️ پاسخ خالی از سرور دریافت شد.' });
         endStream();
       });
       up.res.on('error', () => endStream());
-      /* قطع کلاینت → قطع آپستریم */
       req.signal?.addEventListener('abort', () => {
         closed = true;
         up.req.destroy();
