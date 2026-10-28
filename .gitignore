@@ -71,3 +71,8 @@ cloudflare/.dev.vars
 .wrangler/
 cloudflare/.bundle-tmp/
 cloudflare/pages-dist/
+
+# ── ابزارهای سندباکس (نباید وارد مخزن شوند) ──
+/tool-results/
+/upload/
+/.zscripts/
