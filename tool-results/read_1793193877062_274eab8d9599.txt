@@ -1,0 +1,967 @@
+     1→/**
+     2→ * ─────────────────────────────────────────────────────────────────────────────
+     3→ *  چت هوشمند — نسخهٔ Cloudflare Workers / Cloudflare Pages
+     4→ * ─────────────────────────────────────────────────────────────────────────────
+     5→ *  این فایل همان اپ `app.js` است، اما روی رانتایم Workers (workerd) با Fetch API.
+     6→ *  برای اینکه منطق دوقلو نشود، همهٔ بخش‌های «خالص» از خودِ `app.js` ایمپورت می‌شوند:
+     7→ *    • HTML/CSS/JS رابط چت  → buildPageHtml()
+     8→ *    • لیست مدل‌ها و resolveModelId
+     9→ *    • پارسر SSE سمت سرور    → makeUpstreamParser / collectUpstreamText
+    10→ *    • هدرهای جعلی آپستریم، CORS، سقف حجم بدنه
+    11→ *  بنابراین تغییر در UI یا مدل‌ها خودش در نسخهٔ Worker هم اعمال می‌شود.
+    12→ *
+    13→ *  تفاوت‌های اصلی با نسخهٔ Node:
+    14→ *    • به‌جای `node:http` از `export default { fetch }` استفاده می‌شود.
+    15→ *    • به‌جای `https.request` از `fetch` رانتایم Workers (اتصال Worker→Worker).
+    16→ *    • فایل `api-keys.json` وجود ندارد؛ کلیدها از Secret/KV می‌آیند:
+    17→ *        OPENAI_API_KEY / ANTHROPIC_API_KEY  (Secret)
+    18→ *        یا KV با نام بایندینگ API_KEYS (کلیدِ `api-keys`) تا پایدار بماند
+    19→ *      اگر هیچ‌کدام نباشد، کلید تصادفی «موقتی» برای همان ایزوله ساخته می‌شود.
+    20→ *    • EXPOSE_KEYS به‌صورت پیش‌فرض `false` است (استقرار عمومی = کلیدها ماسک).
+    21→ *
+    22→ *  روت‌ها (دقیقاً مثل app.js):
+    23→ *    GET  /                    → UI چت
+    24→ *    GET  /healthz | /health   → سلامت سبک (بدون تماس با آپستریم)
+    25→ *    POST /api/chat            → پروکسی استریم به آپستریم (SSE زنده)
+    26→ *    GET  /api/ping            → تست اتصال به آپستریم
+    27→ *    GET  /v1/models           → لیست مدل‌ها (OpenAI — عمومی)
+    28→ *    POST /v1/chat/completions → سازگار OpenAI   (Authorization: Bearer)
+    29→ *    POST /v1/messages         → سازگار Anthropic (x-api-key)
+    30→ *    OPTIONS *                 → 204 با CORS باز
+    31→ *    بقیه                      → 404
+    32→ *
+    33→ *  متغیرها (wrangler.jsonc ▸ vars یا `wrangler secret put`):
+    34→ *    UPSTREAM_URL   آدرس آپستریم (پیش‌فرض: همان freemodels)
+    35→ *    EXPOSE_KEYS    نمایش کلیدها در UI (پیش‌فرض false)
+    36→ *    OPENAI_API_KEY / ANTHROPIC_API_KEY  → Secret
+    37→ *    API_KEYS       → بایندینگ KV (اختیاری، برای پایداری کلیدها)
+    38→ * ─────────────────────────────────────────────────────────────────────────────
+    39→ */
+    40→import shared from '../app.js';
+    41→
+    42→const {
+    43→  buildPageHtml,
+    44→  serverDataJson,
+    45→  EMBEDDED_LOGOS,
+    46→  FM_MODELS,
+    47→  DEFAULT_MODEL_ID,
+    48→  BOOT_AT,
+    49→  resolveModelId,
+    50→  UPSTREAM_URL: DEFAULT_UPSTREAM_URL,
+    51→  UPSTREAM_TIMEOUT_MS,
+    52→  MAX_BODY_BYTES,
+    53→  SPOOFED_HEADERS,
+    54→  OPEN_CORS,
+    55→  makeUpstreamParser,
+    56→  collectUpstreamText,
+    57→  flattenContent,
+    58→  maskKey,
+    59→  isUsableKey,
+    60→} = shared;
+    61→
+    62→/* ⚠️ نکتهٔ workerd: در زمان ارزیابی ماژول، `Date.now()` مقدار ۰ می‌دهد!
+    63→   پس سن ایزوله و فیلد `created` را تنبل (در اولین درخواست) محاسبه می‌کنیم. */
+    64→let STARTED_AT = 0;
+    65→let MODELS_CREATED_AT = 0;
+    66→function isolateAgeSec() {
+    67→  const now = Date.now();
+    68→  if (!STARTED_AT) STARTED_AT = now;
+    69→  return Math.round((now - STARTED_AT) / 1000);
+    70→}
+    71→function modelsCreatedAt() {
+    72→  if (!MODELS_CREATED_AT) MODELS_CREATED_AT = BOOT_AT || Math.floor(Date.now() / 1000);
+    73→  return MODELS_CREATED_AT;
+    74→}
+    75→
+    76→const enc = new TextEncoder();
+    77→const dec = new TextDecoder();
+    78→
+    79→/* ───────────────────────── ابزارهای کوچک ───────────────────────── */
+    80→
+    81→function log(msg) {
+    82→  console.log('[smart-chat] ' + msg);
+    83→}
+    84→
+    85→/** تولید توکن تصادفی با Web Crypto (بدون وابستگی به node:crypto) */
+    86→function randToken(len, alphabet) {
+    87→  const abc = alphabet || 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    88→  const bytes = new Uint8Array(len);
+    89→  crypto.getRandomValues(bytes);
+    90→  let s = '';
+    91→  for (let i = 0; i < len; i++) s += abc[bytes[i] % abc.length];
+    92→  return s;
+    93→}
+    94→
+    95→function byteLen(s) {
+    96→  return enc.encode(String(s)).length;
+    97→}
+    98→
+    99→function jsonResponse(status, obj, extraHeaders) {
+   100→  return new Response(JSON.stringify(obj), {
+   101→    status,
+   102→    headers: Object.assign({ 'Content-Type': 'application/json; charset=utf-8' }, OPEN_CORS, extraHeaders || {}),
+   103→  });
+   104→}
+   105→
+   106→/* ───────────────────────── کلیدهای API ─────────────────────────
+   107→   ترتیب اولویت:  Secret → KV → تصادفیِ موقتی (per-isolate)
+   108→   نتیجه کش می‌شود تا هر درخواست به KV نرویم. */
+   109→const KEY_CACHE = { sig: '', keys: null, source: '' };
+   110→
+   111→async function getKeys(env) {
+   112→  const envOpen = String(env.OPENAI_API_KEY || '').trim();
+   113→  const envAnt = String(env.ANTHROPIC_API_KEY || '').trim();
+   114→  const sig = envOpen + '\u0000' + envAnt + '\u0000' + (env.API_KEYS ? 'kv' : 'no-kv');
+   115→  if (KEY_CACHE.keys && KEY_CACHE.sig === sig) return KEY_CACHE;
+   116→
+   117→  let keys = null;
+   118→  let source = 'ephemeral';
+   119→
+   120→  if (isUsableKey(envOpen) && isUsableKey(envAnt)) {
+   121→    keys = { openai: envOpen, anthropic: envAnt };
+   122→    source = 'secret';
+   123→  } else if (env.API_KEYS && typeof env.API_KEYS.get === 'function') {
+   124→    try {
+   125→      const stored = await env.API_KEYS.get('api-keys', 'json');
+   126→      if (stored && isUsableKey(stored.openai) && isUsableKey(stored.anthropic)) {
+   127→        keys = { openai: stored.openai, anthropic: stored.anthropic };
+   128→        source = 'kv';
+   129→      }
+   130→    } catch (e) {
+   131→      log('KV خوانده نشد: ' + ((e && e.message) || e));
+   132→    }
+   133→    if (!keys) {
+   134→      keys = {
+   135→        openai: isUsableKey(envOpen) ? envOpen : 'sk-' + randToken(48),
+   136→        anthropic: isUsableKey(envAnt) ? envAnt : 'sk-ant-api03-' + randToken(88),
+   137→      };
+   138→      source = 'kv-generated';
+   139→      try {
+   140→        await env.API_KEYS.put('api-keys', JSON.stringify(Object.assign({ createdAt: new Date().toISOString() }, keys)));
+   141→      } catch (e) {
+   142→        log('KV نوشته نشد: ' + ((e && e.message) || e));
+   143→        source = 'ephemeral';
+   144→      }
+   145→    }
+   146→  }
+   147→
+   148→  if (!keys) {
+   149→    /* بدون Secret و بدون KV — فقط برای `wrangler dev` یا تست سریع مناسب است */
+   150→    keys = {
+   151→      openai: isUsableKey(envOpen) ? envOpen : 'sk-' + randToken(48),
+   152→      anthropic: isUsableKey(envAnt) ? envAnt : 'sk-ant-api03-' + randToken(88),
+   153→    };
+   154→    source = 'ephemeral';
+   155→    log('⚠️ کلیدها موقتی‌اند (هر ایزوله یکی می‌سازد). برای کلید پایدار: wrangler secret put OPENAI_API_KEY / ANTHROPIC_API_KEY');
+   156→    log('   OPENAI_API_KEY=' + keys.openai);
+   157→    log('   ANTHROPIC_API_KEY=' + keys.anthropic);
+   158→  }
+   159→
+   160→  KEY_CACHE.sig = sig;
+   161→  KEY_CACHE.keys = keys;
+   162→  KEY_CACHE.source = source;
+   163→  return KEY_CACHE;
+   164→}
+   165→
+   166→function keyIsValid(k, keys) {
+   167→  return !!k && !!keys && (k === keys.openai || k === keys.anthropic);
+   168→}
+   169→
+   170→/** در Worker پیش‌فرض «ماسک» است — برعکس نسخهٔ محلی Node */
+   171→function keysExposed(env) {
+   172→  const v = String(env.EXPOSE_KEYS == null ? '' : env.EXPOSE_KEYS).trim().toLowerCase();
+   173→  if (!v) return false;
+   174→  return v === 'true' || v === '1' || v === 'yes' || v === 'on';
+   175→}
+   176→
+   177→/* ───────────────────────── HTML صفحه ─────────────────────────
+   178→   یک‌بار برای هر (کلیدها، exposed) ساخته و کش می‌شود. */
+   179→const HTML_CACHE = new Map();
+   180→
+   181→function pageHtmlFor(keys, exposed) {
+   182→  const sig = (exposed ? '1' : '0') + '|' + keys.openai + '|' + keys.anthropic;
+   183→  let html = HTML_CACHE.get(sig);
+   184→  if (!html) {
+   185→    html = buildPageHtml(serverDataJson(keys, exposed));
+   186→    HTML_CACHE.set(sig, html);
+   187→  }
+   188→  return html;
+   189→}
+   190→
+   191→/* ───────────────────────── آپستریم ───────────────────────── */
+   192→
+   193→function upstreamUrl(env) {
+   194→  const v = String(env.UPSTREAM_URL || '').trim();
+   195→  return v || DEFAULT_UPSTREAM_URL;
+   196→}
+   197→
+   198→/** هدرهای جعلی مرورگر — Content-Length و Accept-Encoding را رانتایم خودش می‌گذارد */
+   199→function upstreamHeaders() {
+   200→  const h = {};
+   201→  for (const [k, v] of Object.entries(SPOOFED_HEADERS)) {
+   202→    const lk = k.toLowerCase();
+   203→    if (lk === 'content-length' || lk === 'accept-encoding') continue;
+   204→    h[k] = v;
+   205→  }
+   206→  return h;
+   207→}
+   208→
+   209→/**
+   210→ * POST به آپستریم؛ به‌محض رسیدن هدرها resolve می‌شود تا بدنه استریم شود.
+   211→ * اگر کلاینت قطع شود (req.signal) یا تایم‌اوت برسد، درخواست آپستریم abort می‌شود.
+   212→ */
+   213→async function openUpstream(env, bodyStr, opts) {
+   214→  const o = opts || {};
+   215→  const timeoutMs = o.timeoutMs || UPSTREAM_TIMEOUT_MS;
+   216→  const ctrl = new AbortController();
+   217→  let timedOut = false;
+   218→  const timer = setTimeout(() => {
+   219→    timedOut = true;
+   220→    try {
+   221→      ctrl.abort();
+   222→    } catch (e) {
+   223→      /* noop */
+   224→    }
+   225→  }, timeoutMs);
+   226→
+   227→  const onClientAbort = () => {
+   228→    try {
+   229→      ctrl.abort();
+   230→    } catch (e) {
+   231→      /* noop */
+   232→    }
+   233→  };
+   234→  if (o.signal) {
+   235→    if (o.signal.aborted) onClientAbort();
+   236→    else o.signal.addEventListener('abort', onClientAbort, { once: true });
+   237→  }
+   238→
+   239→  try {
+   240→    const res = await fetch(upstreamUrl(env), {
+   241→      method: 'POST',
+   242→      headers: upstreamHeaders(),
+   243→      body: bodyStr,
+   244→      signal: ctrl.signal,
+   245→    });
+   246→    return {
+   247→      status: res.status,
+   248→      headers: res.headers,
+   249→      body: res.body,
+   250→      timedOut: () => timedOut,
+   251→      finish() {
+   252→        clearTimeout(timer);
+   253→        if (o.signal) o.signal.removeEventListener('abort', onClientAbort);
+   254→      },
+   255→      cancel() {
+   256→        clearTimeout(timer);
+   257→        if (o.signal) o.signal.removeEventListener('abort', onClientAbort);
+   258→        try {
+   259→          ctrl.abort();
+   260→        } catch (e) {
+   261→          /* noop */
+   262→        }
+   263→      },
+   264→    };
+   265→  } catch (e) {
+   266→    clearTimeout(timer);
+   267→    if (o.signal) o.signal.removeEventListener('abort', onClientAbort);
+   268→    const err = new Error(timedOut ? 'UPSTREAM_TIMEOUT — پاسخ آپستریم بیش از حد طول کشید' : (e && e.message) || String(e));
+   269→    err.timedOut = timedOut;
+   270→    throw err;
+   271→  }
+   272→}
+   273→
+   274→/** خواندن کامل بدنهٔ آپستریم به رشته (با سقف) */
+   275→async function readBodyText(body, cap) {
+   276→  if (!body) return '';
+   277→  const reader = body.getReader();
+   278→  let s = '';
+   279→  try {
+   280→    while (true) {
+   281→      const { done, value } = await reader.read();
+   282→      if (done) break;
+   283→      s += dec.decode(value, { stream: true });
+   284→      if (s.length > cap) {
+   285→        try {
+   286→          await reader.cancel();
+   287→        } catch (e) {
+   288→          /* noop */
+   289→        }
+   290→        break;
+   291→      }
+   292→    }
+   293→  } catch (e) {
+   294→    /* استریم نصفه بسته شد — همان‌چه داریم برمی‌گردانیم */
+   295→  }
+   296→  return s;
+   297→}
+   298→
+   299→/** خواندن بدنهٔ درخواست کلاینت با سقف حجم */
+   300→async function readRequestBody(req, limit) {
+   301→  const declared = Number(req.headers.get('content-length') || '0');
+   302→  if (declared > limit) return { data: '', tooLarge: true };
+   303→  const text = await req.text();
+   304→  if (byteLen(text) > limit) return { data: '', tooLarge: true };
+   305→  return { data: text, tooLarge: false };
+   306→}
+   307→
+   308→/* ───────────────────────── روت‌ها ───────────────────────── */
+   309→
+   310→function handleHome(env) {
+   311→  const exposed = keysExposed(env);
+   312→  return getKeys(env).then(({ keys }) =>
+   313→    new Response(pageHtmlFor(keys, exposed), {
+   314→      status: 200,
+   315→      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+   316→    })
+   317→  );
+   318→}
+   319→
+   320→function handleLogo(entry) {
+   321→  const bytes = Uint8Array.from(atob(entry.b64), (c) => c.charCodeAt(0));
+   322→  return new Response(bytes, {
+   323→    status: 200,
+   324→    headers: { 'Content-Type': entry.mime, 'Cache-Control': 'public, max-age=604800' },
+   325→  });
+   326→}
+   327→
+   328→function handleHealthz(env, keysInfo, headOnly) {
+   329→  const body = JSON.stringify({
+   330→    status: 'ok',
+   331→    service: 'smart-chat',
+   332→    runtime: 'cloudflare-worker',
+   333→    uptimeSec: isolateAgeSec(),
+   334→    models: FM_MODELS.length,
+   335→    defaultModel: DEFAULT_MODEL_ID,
+   336→    upstream: upstreamUrl(env),
+   337→    keysExposed: keysExposed(env),
+   338→    keysSource: keysInfo ? keysInfo.source : 'unknown',
+   339→    timestamp: new Date().toISOString(),
+   340→  });
+   341→  if (headOnly) {
+   342→    return new Response(null, {
+   343→      status: 200,
+   344→      headers: { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' },
+   345→    });
+   346→  }
+   347→  return new Response(body, {
+   348→    status: 200,
+   349→    headers: {
+   350→      'Content-Type': 'application/json; charset=utf-8',
+   351→      'Cache-Control': 'no-store, no-cache, must-revalidate',
+   352→      'Access-Control-Allow-Origin': '*',
+   353→    },
+   354→  });
+   355→}
+   356→
+   357→/* ---------- POST /api/chat — پروکسی استریم (بدون بافر) ---------- */
+   358→async function handleChat(env, req) {
+   359→  const started = Date.now();
+   360→  const body = await readRequestBody(req, MAX_BODY_BYTES);
+   361→  if (body.tooLarge) return jsonResponse(413, { error: { message: 'حجم درخواست بیش از حد مجاز (۵ مگابایت) است.' } });
+   362→
+   363→  /* نرمال‌سازی modelId — همان رفتار app.js */
+   364→  let bodyOut = body.data;
+   365→  try {
+   366→    const j = JSON.parse(body.data);
+   367→    if (j && typeof j === 'object' && 'modelId' in j) {
+   368→      j.modelId = resolveModelId(j.modelId);
+   369→      bodyOut = JSON.stringify(j);
+   370→    }
+   371→  } catch (e) {
+   372→    /* بدنه غیر JSON — خام عبور می‌کند */
+   373→  }
+   374→
+   375→  let up;
+   376→  try {
+   377→    up = await openUpstream(env, bodyOut, { signal: req.signal });
+   378→  } catch (err) {
+   379→    const msg = (err && err.message) || String(err);
+   380→    log('POST /api/chat ✖ ' + msg);
+   381→    return jsonResponse(err.timedOut ? 504 : 502, {
+   382→      error: {
+   383→        message: err.timedOut
+   384→          ? 'پاسخ آپستریم بیش از حد طول کشید (۱۸۰ ثانیه).'
+   385→          : 'اتصال به سرویس چت برقرار نشد: ' + msg,
+   386→      },
+   387→    });
+   388→  }
+   389→
+   390→  const outHeaders = {};
+   391→  up.headers.forEach((v, k) => {
+   392→    const lk = k.toLowerCase();
+   393→    if (lk.startsWith('access-control-')) return;
+   394→    if (lk === 'transfer-encoding' || lk === 'content-encoding' || lk === 'content-length') return;
+   395→    if (lk === 'connection' || lk === 'keep-alive') return;
+   396→    outHeaders[k] = v;
+   397→  });
+   398→  outHeaders['Cache-Control'] = 'no-cache, no-transform';
+   399→  outHeaders['X-Accel-Buffering'] = 'no';
+   400→
+   401→  log('POST /api/chat ← آپستریم ' + up.status + ' (' + (Date.now() - started) + 'ms تا هدرها)');
+   402→
+   403→  /* پاس‌دادن مستقیم استریم — Workers خودش backpressure را مدیریت می‌کند */
+   404→  if (up.status === 204 || up.status === 205 || up.status === 304) {
+   405→    up.finish();
+   406→    return new Response(null, { status: up.status, headers: outHeaders });
+   407→  }
+   408→  return new Response(up.body, { status: up.status, headers: outHeaders });
+   409→}
+   410→
+   411→/* ---------- GET /api/ping ---------- */
+   412→async function handlePing(env, req) {
+   413→  const started = Date.now();
+   414→  const payload = JSON.stringify({
+   415→    messages: [{ role: 'user', content: 'ping' }],
+   416→    modelId: DEFAULT_MODEL_ID,
+   417→    thinking: false,
+   418→    deepSearch: false,
+   419→    stream: false,
+   420→  });
+   421→  try {
+   422→    const up = await openUpstream(env, payload, { timeoutMs: 20_000, signal: req.signal });
+   423→    const text = await readBodyText(up.body, 200_000);
+   424→    up.finish();
+   425→    const ms = Date.now() - started;
+   426→    let sample = text.slice(0, 200);
+   427→    try {
+   428→      const j = JSON.parse(text);
+   429→      if (j && typeof j === 'object' && 'error' in j) {
+   430→        const er = j.error;
+   431→        sample = typeof er === 'string' ? er : String((er && er.message != null ? er.message : JSON.stringify(er)));
+   432→      } else if (j && typeof j.content === 'string') sample = j.content;
+   433→      else if (j && typeof j.text === 'string') sample = j.text;
+   434→      else if (j && Array.isArray(j.choices)) {
+   435→        const c = j.choices[0];
+   436→        if (c && c.message && typeof c.message.content === 'string') sample = c.message.content;
+   437→      }
+   438→    } catch (e) {
+   439→      /* JSON نبود — همان متن خام */
+   440→    }
+   441→    return jsonResponse(200, { status: 'ok', ms, sample: String(sample).slice(0, 200) });
+   442→  } catch (err) {
+   443→    const ms = Date.now() - started;
+   444→    const msg = (err && err.message) || String(err);
+   445→    log('GET /api/ping ✖ ' + msg);
+   446→    return jsonResponse(200, { status: 'error', ms, sample: msg.slice(0, 200) });
+   447→  }
+   448→}
+   449→
+   450→/* ---------- GET /v1/models ---------- */
+   451→function handleModels() {
+   452→  return jsonResponse(200, {
+   453→    object: 'list',
+   454→    data: FM_MODELS.map((m) => ({
+   455→      id: m.id,
+   456→      object: 'model',
+   457→      created: modelsCreatedAt(),
+   458→      owned_by: 'freemodels-' + m.vendor.toLowerCase().replace(/\s+/g, '-'),
+   459→    })),
+   460→  });
+   461→}
+   462→
+   463→/* ---------- ابزارهای مشترک /v1 ---------- */
+   464→const SSE_HEADERS = Object.assign(
+   465→  {
+   466→    'Content-Type': 'text/event-stream; charset=utf-8',
+   467→    'Cache-Control': 'no-cache, no-transform',
+   468→    'X-Accel-Buffering': 'no',
+   469→  },
+   470→  OPEN_CORS
+   471→);
+   472→
+   473→function openaiError(status, message, code) {
+   474→  return jsonResponse(status, {
+   475→    error: {
+   476→      message,
+   477→      type: status === 401 ? 'invalid_request_error' : status >= 500 ? 'api_error' : 'invalid_request_error',
+   478→      param: null,
+   479→      code: code == null ? null : code,
+   480→    },
+   481→  });
+   482→}
+   483→
+   484→function anthropicError(status, type, message) {
+   485→  return jsonResponse(status, { type: 'error', error: { type, message } });
+   486→}
+   487→
+   488→function randHex(bytes) {
+   489→  const b = new Uint8Array(bytes);
+   490→  crypto.getRandomValues(b);
+   491→  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+   492→}
+   493→
+   494→/**
+   495→ * ساختن Response استریم SSE.
+   496→ * `run(write, close)` بدنه را می‌نویسد؛ اگر کلاینت قطع شود `cancel` صدا زده می‌شود.
+   497→ */
+   498→function sseResponse(run) {
+   499→  let cancelHook = null;
+   500→  const stream = new ReadableStream({
+   501→    start(controller) {
+   502→      let closed = false;
+   503→      const write = (s) => {
+   504→        if (closed) return;
+   505→        try {
+   506→          controller.enqueue(enc.encode(s));
+   507→        } catch (e) {
+   508→          closed = true;
+   509→        }
+   510→      };
+   511→      const close = () => {
+   512→        if (closed) return;
+   513→        closed = true;
+   514→        try {
+   515→          controller.close();
+   516→        } catch (e) {
+   517→          /* noop */
+   518→        }
+   519→      };
+   520→      return Promise.resolve()
+   521→        .then(() => run(write, close, (fn) => (cancelHook = fn)))
+   522→        .catch((e) => {
+   523→          log('SSE ✖ ' + ((e && e.message) || e));
+   524→          close();
+   525→        });
+   526→    },
+   527→    cancel() {
+   528→      if (typeof cancelHook === 'function') {
+   529→        try {
+   530→          cancelHook();
+   531→        } catch (e) {
+   532→          /* noop */
+   533→        }
+   534→      }
+   535→    },
+   536→  });
+   537→  return new Response(stream, { status: 200, headers: SSE_HEADERS });
+   538→}
+   539→
+   540→/* ---------- POST /v1/chat/completions ---------- */
+   541→async function handleOpenAI(env, req) {
+   542→  const started = Date.now();
+   543→  const { keys } = await getKeys(env);
+   544→  const auth = req.headers.get('authorization') || '';
+   545→  const bearer = /^Bearer\s+(.+)$/i.exec(auth.trim());
+   546→  if (!keyIsValid(bearer ? bearer[1].trim() : null, keys)) return openaiError(401, 'کلید API نامعتبر است (هدر Authorization: Bearer).', 'invalid_api_key');
+   547→
+   548→  const body = await readRequestBody(req, MAX_BODY_BYTES);
+   549→  if (body.tooLarge) return openaiError(413, 'حجم درخواست بیش از حد مجاز (۵ مگابایت) است.');
+   550→  let parsed;
+   551→  try {
+   552→    parsed = JSON.parse(body.data || '{}');
+   553→  } catch (e) {
+   554→    return openaiError(400, 'بدنهٔ JSON نامعتبر است.');
+   555→  }
+   556→
+   557→  const upstreamMsgs = [];
+   558→  for (const m of Array.isArray(parsed.messages) ? parsed.messages : []) {
+   559→    if (!m || typeof m !== 'object') continue;
+   560→    const role = m.role === 'assistant' || m.role === 'system' ? m.role : 'user';
+   561→    const content = flattenContent(m.content);
+   562→    if (content) upstreamMsgs.push({ role, content });
+   563→  }
+   564→  if (!upstreamMsgs.length) return openaiError(400, 'messages باید آرایه‌ای غیرخالی از پیام‌ها باشد.');
+   565→
+   566→  const model = resolveModelId(parsed.model);
+   567→  const wantStream = !!parsed.stream;
+   568→  const payload = {
+   569→    messages: upstreamMsgs,
+   570→    modelId: model,
+   571→    thinking: parsed.thinking === true,
+   572→    deepSearch: parsed.deep_search === true,
+   573→    stream: wantStream,
+   574→  };
+   575→  const promptChars = upstreamMsgs.reduce((n, m) => n + m.content.length, 0);
+   576→  const estIn = Math.max(1, Math.ceil(promptChars / 4));
+   577→  const id = 'chatcmpl-' + randHex(10);
+   578→  const created = Math.floor(Date.now() / 1000);
+   579→
+   580→  /* ── غیراستریم ── */
+   581→  if (!wantStream) {
+   582→    let up;
+   583→    try {
+   584→      up = await openUpstream(env, JSON.stringify(payload), { signal: req.signal });
+   585→    } catch (err) {
+   586→      const msg = (err && err.message) || String(err);
+   587→      log('POST /v1/chat/completions ✖ ' + msg);
+   588→      return openaiError(err.timedOut ? 504 : 502, 'اتصال به سرویس چت برقرار نشد: ' + msg);
+   589→    }
+   590→    if (up.status >= 400) {
+   591→      const txt = await readBodyText(up.body, 4000);
+   592→      up.cancel();
+   593→      return openaiError(up.status, 'خطای سرویس چت (HTTP ' + up.status + '): ' + txt.trim().slice(0, 300));
+   594→    }
+   595→    const full = await readBodyText(up.body, 8 * 1024 * 1024);
+   596→    up.finish();
+   597→    const acc = collectUpstreamText(full);
+   598→    const content = acc.text || acc.reasoning || '⚠️ پاسخ خالی از سرور دریافت شد.';
+   599→    const estOut = Math.max(1, Math.ceil(content.length / 4));
+   600→    log('POST /v1/chat/completions → 200 (' + (Date.now() - started) + 'ms · ' + content.length + ' کاراکتر)');
+   601→    return jsonResponse(200, {
+   602→      id,
+   603→      object: 'chat.completion',
+   604→      created,
+   605→      model,
+   606→      choices: [{ index: 0, message: { role: 'assistant', content }, logprobs: null, finish_reason: 'stop' }],
+   607→      usage: { prompt_tokens: estIn, completion_tokens: estOut, total_tokens: estIn + estOut },
+   608→    });
+   609→  }
+   610→
+   611→  /* ── استریم SSE ── */
+   612→  const includeUsage = !!(parsed.stream_options && parsed.stream_options.include_usage);
+   613→  return sseResponse(async (write, close, onCancel) => {
+   614→    let outChars = 0;
+   615→    let gotText = false;
+   616→    let gotReasoning = false;
+   617→    let finished = false;
+   618→    let up = null;
+   619→
+   620→    onCancel(() => {
+   621→      finished = true;
+   622→      if (up) up.cancel();
+   623→    });
+   624→
+   625→    const chunk = (delta, finish) => {
+   626→      if (finished) return;
+   627→      write(
+   628→        'data: ' +
+   629→          JSON.stringify({
+   630→            id,
+   631→            object: 'chat.completion.chunk',
+   632→            created,
+   633→            model,
+   634→            choices: [{ index: 0, delta, finish_reason: finish == null ? null : finish }],
+   635→          }) +
+   636→          '\n\n'
+   637→      );
+   638→    };
+   639→    const endStream = () => {
+   640→      if (finished) return;
+   641→      finished = true;
+   642→      chunk({}, 'stop');
+   643→      if (includeUsage) {
+   644→        const estOut = Math.max(1, Math.ceil(outChars / 4));
+   645→        write(
+   646→          'data: ' +
+   647→            JSON.stringify({
+   648→              id,
+   649→              object: 'chat.completion.chunk',
+   650→              created,
+   651→              model,
+   652→              choices: [],
+   653→              usage: { prompt_tokens: estIn, completion_tokens: estOut, total_tokens: estIn + estOut },
+   654→            }) +
+   655→            '\n\n'
+   656→        );
+   657→      }
+   658→      write('data: [DONE]\n\n');
+   659→      close();
+   660→      if (up) up.finish();
+   661→      log('POST /v1/chat/completions → استریم تمام شد (' + (Date.now() - started) + 'ms · ' + outChars + ' کاراکتر)');
+   662→    };
+   663→
+   664→    const parser = makeUpstreamParser((d) => {
+   665→      if (d.error) {
+   666→        chunk({ content: '\n\n⚠️ ' + d.error });
+   667→        return;
+   668→      }
+   669→      if (d.reasoning) {
+   670→        gotReasoning = true;
+   671→        chunk({ reasoning_content: d.reasoning });
+   672→      }
+   673→      if (d.text) {
+   674→        gotText = true;
+   675→        outChars += d.text.length;
+   676→        chunk({ content: d.text });
+   677→      }
+   678→    });
+   679→
+   680→    try {
+   681→      up = await openUpstream(env, JSON.stringify(payload), { signal: req.signal });
+   682→    } catch (err) {
+   683→      chunk({ content: '⚠️ اتصال به سرویس چت برقرار نشد: ' + ((err && err.message) || err) });
+   684→      endStream();
+   685→      return;
+   686→    }
+   687→    if (up.status >= 400) {
+   688→      const txt = await readBodyText(up.body, 4000);
+   689→      up.cancel();
+   690→      chunk({ content: '⚠️ خطای سرویس چت (HTTP ' + up.status + '): ' + txt.trim().slice(0, 200) });
+   691→      finished = false; // endStream باید اجرا شود
+   692→      endStream();
+   693→      return;
+   694→    }
+   695→
+   696→    write(': connected\n\n');
+   697→    chunk({ role: 'assistant', content: '' });
+   698→
+   699→    try {
+   700→      const reader = up.body.getReader();
+   701→      while (true) {
+   702→        const { done, value } = await reader.read();
+   703→        if (done) break;
+   704→        parser.push(dec.decode(value, { stream: true }));
+   705→        if (finished) break; // کلاینت رفته
+   706→      }
+   707→    } catch (e) {
+   708→      /* استریم قطع شد */
+   709→    }
+   710→    parser.end();
+   711→    if (!gotText && !gotReasoning) chunk({ content: '⚠️ پاسخ خالی از سرور دریافت شد.' });
+   712→    endStream();
+   713→  });
+   714→}
+   715→
+   716→/* ---------- POST /v1/messages (Anthropic) ---------- */
+   717→async function handleAnthropic(env, req) {
+   718→  const started = Date.now();
+   719→  const { keys } = await getKeys(env);
+   720→  const apiKey = (req.headers.get('x-api-key') || '').trim();
+   721→  const auth = req.headers.get('authorization') || '';
+   722→  const bearer = /^Bearer\s+(.+)$/i.exec(auth.trim());
+   723→  const key = apiKey || (bearer ? bearer[1].trim() : null);
+   724→  if (!keyIsValid(key, keys)) return anthropicError(401, 'authentication_error', 'کلید API نامعتبر است (هدر x-api-key).');
+   725→
+   726→  const body = await readRequestBody(req, MAX_BODY_BYTES);
+   727→  if (body.tooLarge) return anthropicError(413, 'invalid_request_error', 'حجم درخواست بیش از حد مجاز (۵ مگابایت) است.');
+   728→  let parsed;
+   729→  try {
+   730→    parsed = JSON.parse(body.data || '{}');
+   731→  } catch (e) {
+   732→    return anthropicError(400, 'invalid_request_error', 'بدنهٔ JSON نامعتبر است.');
+   733→  }
+   734→  if (!parsed.model || typeof parsed.model !== 'string') return anthropicError(400, 'invalid_request_error', 'model: Field required');
+   735→  if (typeof parsed.max_tokens !== 'number') return anthropicError(400, 'invalid_request_error', 'max_tokens: Field required');
+   736→
+   737→  const upstreamMsgs = [];
+   738→  let sysText = '';
+   739→  if (typeof parsed.system === 'string') sysText = parsed.system;
+   740→  else if (Array.isArray(parsed.system)) sysText = parsed.system.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('\n');
+   741→  if (sysText.trim()) upstreamMsgs.push({ role: 'system', content: sysText.trim() });
+   742→  for (const m of Array.isArray(parsed.messages) ? parsed.messages : []) {
+   743→    if (!m || typeof m !== 'object') continue;
+   744→    const content = flattenContent(m.content);
+   745→    if (content) upstreamMsgs.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content });
+   746→  }
+   747→  if (!upstreamMsgs.length) return anthropicError(400, 'invalid_request_error', 'messages: at least one message is required');
+   748→
+   749→  const model = resolveModelId(parsed.model);
+   750→  const wantStream = !!parsed.stream;
+   751→  const payload = {
+   752→    messages: upstreamMsgs,
+   753→    modelId: model,
+   754→    thinking: parsed.thinking === true,
+   755→    deepSearch: false,
+   756→    stream: wantStream,
+   757→  };
+   758→  const promptChars = upstreamMsgs.reduce((n, m) => n + m.content.length, 0);
+   759→  const estIn = Math.max(1, Math.ceil(promptChars / 4));
+   760→  const msgId = 'msg_' + randHex(10);
+   761→
+   762→  /* ── غیراستریم ── */
+   763→  if (!wantStream) {
+   764→    let up;
+   765→    try {
+   766→      up = await openUpstream(env, JSON.stringify(payload), { signal: req.signal });
+   767→    } catch (err) {
+   768→      const msg = (err && err.message) || String(err);
+   769→      log('POST /v1/messages ✖ ' + msg);
+   770→      return anthropicError(err.timedOut ? 504 : 502, 'api_error', 'اتصال به سرویس چت برقرار نشد: ' + msg);
+   771→    }
+   772→    if (up.status >= 400) {
+   773→      const txt = await readBodyText(up.body, 4000);
+   774→      up.cancel();
+   775→      return anthropicError(up.status, up.status === 429 ? 'rate_limit_error' : 'api_error', 'خطای سرویس چت (HTTP ' + up.status + '): ' + txt.trim().slice(0, 300));
+   776→    }
+   777→    const full = await readBodyText(up.body, 8 * 1024 * 1024);
+   778→    up.finish();
+   779→    const acc = collectUpstreamText(full);
+   780→    const blocks = [];
+   781→    if (acc.reasoning) blocks.push({ type: 'thinking', thinking: acc.reasoning });
+   782→    blocks.push({ type: 'text', text: acc.text || (acc.error ? '⚠️ ' + acc.error : '') });
+   783→    if (!acc.text && !acc.reasoning && !acc.error) blocks.push({ type: 'text', text: '⚠️ پاسخ خالی از سرور دریافت شد.' });
+   784→    log('POST /v1/messages → 200 (' + (Date.now() - started) + 'ms)');
+   785→    return jsonResponse(200, {
+   786→      id: msgId,
+   787→      type: 'message',
+   788→      role: 'assistant',
+   789→      model,
+   790→      content: blocks,
+   791→      stop_reason: 'end_turn',
+   792→      stop_sequence: null,
+   793→      usage: { input_tokens: estIn, output_tokens: Math.max(1, Math.ceil((acc.text || '').length / 4)) },
+   794→    });
+   795→  }
+   796→
+   797→  /* ── استریم SSE به سبک Anthropic ── */
+   798→  return sseResponse(async (write, close, onCancel) => {
+   799→    let blockIdx = -1;
+   800→    let blockType = null;
+   801→    let outChars = 0;
+   802→    let gotAny = false;
+   803→    let finished = false;
+   804→    let up = null;
+   805→
+   806→    onCancel(() => {
+   807→      finished = true;
+   808→      if (up) up.cancel();
+   809→    });
+   810→
+   811→    const ev = (name, obj) => {
+   812→      if (finished && name !== 'message_stop') {
+   813→        /* همچنان allow — ساده نگه داشته شد */
+   814→      }
+   815→      write('event: ' + name + '\ndata: ' + JSON.stringify(obj) + '\n\n');
+   816→    };
+   817→    const closeBlock = () => {
+   818→      if (blockType) {
+   819→        ev('content_block_stop', { type: 'content_block_stop', index: blockIdx });
+   820→        blockType = null;
+   821→      }
+   822→    };
+   823→    const openBlock = (t) => {
+   824→      if (blockType === t) return;
+   825→      closeBlock();
+   826→      blockIdx++;
+   827→      blockType = t;
+   828→      ev('content_block_start', {
+   829→        type: 'content_block_start',
+   830→        index: blockIdx,
+   831→        content_block: t === 'text' ? { type: 'text', text: '' } : { type: 'thinking', thinking: '' },
+   832→      });
+   833→    };
+   834→    const endStream = () => {
+   835→      if (finished) return;
+   836→      finished = true;
+   837→      closeBlock();
+   838→      ev('message_delta', {
+   839→        type: 'message_delta',
+   840→        delta: { stop_reason: 'end_turn', stop_sequence: null },
+   841→        usage: { output_tokens: Math.max(1, Math.ceil(outChars / 4)) },
+   842→      });
+   843→      ev('message_stop', { type: 'message_stop' });
+   844→      close();
+   845→      if (up) up.finish();
+   846→      log('POST /v1/messages → استریم تمام شد (' + (Date.now() - started) + 'ms · ' + outChars + ' کاراکتر)');
+   847→    };
+   848→
+   849→    const parser = makeUpstreamParser((d) => {
+   850→      if (d.error) {
+   851→        openBlock('text');
+   852→        ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: '\n\n⚠️ ' + d.error } });
+   853→        return;
+   854→      }
+   855→      if (d.reasoning) {
+   856→        gotAny = true;
+   857→        openBlock('thinking');
+   858→        ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'thinking_delta', thinking: d.reasoning } });
+   859→      }
+   860→      if (d.text) {
+   861→        gotAny = true;
+   862→        openBlock('text');
+   863→        outChars += d.text.length;
+   864→        ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: d.text } });
+   865→      }
+   866→    });
+   867→
+   868→    ev('message_start', {
+   869→      type: 'message_start',
+   870→      message: {
+   871→        id: msgId,
+   872→        type: 'message',
+   873→        role: 'assistant',
+   874→        model,
+   875→        content: [],
+   876→        stop_reason: null,
+   877→        stop_sequence: null,
+   878→        usage: { input_tokens: estIn, output_tokens: 0 },
+   879→      },
+   880→    });
+   881→    ev('ping', { type: 'ping' });
+   882→
+   883→    try {
+   884→      up = await openUpstream(env, JSON.stringify(payload), { signal: req.signal });
+   885→    } catch (err) {
+   886→      openBlock('text');
+   887→      ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: '⚠️ اتصال به سرویس چت برقرار نشد: ' + ((err && err.message) || err) } });
+   888→      endStream();
+   889→      return;
+   890→    }
+   891→    if (up.status >= 400) {
+   892→      const txt = await readBodyText(up.body, 4000);
+   893→      up.cancel();
+   894→      up = null;
+   895→      openBlock('text');
+   896→      ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: '⚠️ خطای سرویس چت (HTTP ' + txt.trim().slice(0, 200) + ')' } });
+   897→      endStream();
+   898→      return;
+   899→    }
+   900→
+   901→    try {
+   902→      const reader = up.body.getReader();
+   903→      while (true) {
+   904→        const { done, value } = await reader.read();
+   905→        if (done) break;
+   906→        parser.push(dec.decode(value, { stream: true }));
+   907→        if (finished) break;
+   908→      }
+   909→    } catch (e) {
+   910→      /* استریم قطع شد */
+   911→    }
+   912→    parser.end();
+   913→    if (!gotAny) {
+   914→      openBlock('text');
+   915→      ev('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'text_delta', text: '⚠️ پاسخ خالی از سرور دریافت شد.' } });
+   916→    }
+   917→    endStream();
+   918→  });
+   919→}
+   920→
+   921→/* ───────────────────────── روتر ───────────────────────── */
+   922→
+   923→const worker = {
+   924→  async fetch(req, env, ctx) {
+   925→    const url = new URL(req.url);
+   926→    const path = url.pathname;
+   927→    const method = req.method;
+   928→
+   929→    try {
+   930→      if (method === 'OPTIONS') return new Response(null, { status: 204, headers: OPEN_CORS });
+   931→
+   932→      if (method === 'GET' && (path === '/' || path === '/index.html')) return await handleHome(env);
+   933→
+   934→      if (method === 'GET' && EMBEDDED_LOGOS[path]) return handleLogo(EMBEDDED_LOGOS[path]);
+   935→
+   936→      if ((method === 'GET' || method === 'HEAD') && (path === '/healthz' || path === '/health')) {
+   937→        const info = await getKeys(env);
+   938→        return handleHealthz(env, info, method === 'HEAD');
+   939→      }
+   940→
+   941→      if (method === 'POST' && path === '/api/chat') return await handleChat(env, req);
+   942→      if (method === 'GET' && path === '/api/ping') return await handlePing(env, req);
+   943→      if (method === 'GET' && path === '/v1/models') return handleModels();
+   944→      if (method === 'POST' && path === '/v1/chat/completions') return await handleOpenAI(env, req);
+   945→      if (method === 'POST' && path === '/v1/messages') return await handleAnthropic(env, req);
+   946→
+   947→      return new Response('404 — مسیر یافت نشد', {
+   948→        status: 404,
+   949→        headers: Object.assign({ 'Content-Type': 'text/plain; charset=utf-8' }, OPEN_CORS),
+   950→      });
+   951→    } catch (e) {
+   952→      /* هیچ خطایی نباید کل Worker را بیندازد */
+   953→      log('✖ ' + method + ' ' + path + ' → ' + ((e && e.stack) || e));
+   954→      if (ctx && typeof ctx.waitUntil === 'function') {
+   955→        try {
+   956→          ctx.waitUntil(Promise.resolve());
+   957→        } catch (e2) {
+   958→          /* noop */
+   959→        }
+   960→      }
+   961→      return jsonResponse(500, { error: { message: 'خطای داخلی سرور' } });
+   962→    }
+   963→  },
+   964→};
+   965→
+   966→export default worker;
+   967→

@@ -2,7 +2,9 @@
  * تنظیمات و ابزار ارتباط با API آپستریم (freemodels)
  * هدرهای مرورگر جعل می‌شوند تا CORS آپستریم (که فقط freemodels.pro را باز گذاشته) دور زده شود.
  */
-import { request as httpsRequest, type ClientRequest, type IncomingHttpHeaders, type IncomingMessage } from 'node:https';
+import { request as httpsRequest } from 'node:https';
+// تایپ‌های HTTP از `node:http` export می‌شوند (node:https آن‌ها را ندارد)
+import type { ClientRequest, IncomingHttpHeaders, IncomingMessage } from 'node:http';
 
 export const UPSTREAM_URL = 'https://freemodels-chat.freemodels.workers.dev/';
 export const MAX_BODY_BYTES = 5 * 1024 * 1024; // حداکثر حجم بدنه درخواست: ۵ مگابایت

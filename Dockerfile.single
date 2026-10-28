@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+# ═══════════════════════════════════════════════════════════════════════════
+#  چت هوشمند — تصویر Docker نسخهٔ تک‌فایل (app.js)
+# ═══════════════════════════════════════════════════════════════════════════
+#  جایگزین سبکِ Dockerfile اصلی: بدون npm install، بدون بیلد — فقط یک فایل.
+#  تصویر نهایی ~۵۰MB (در برابر ~۲۰۰MB نسخهٔ Next.js) و در <۲ ثانیه بالا می‌آید.
+#
+#  Build :  docker build -f Dockerfile.single -t smart-chat-single .
+#  Run   :  docker run --rm -p 3000:3000 \
+#             -e OPENAI_API_KEY=sk-... -e ANTHROPIC_API_KEY=sk-ant-api03-... \
+#             smart-chat-single
+#
+#  در Railway: Settings ▸ Build ▸ Dockerfile Path = Dockerfile.single
+# ═══════════════════════════════════════════════════════════════════════════
+FROM node:22-alpine
+
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOST=0.0.0.0
+
+# فقط همان یک فایل (هیچ وابستگی خارجی ندارد)
+COPY --chown=node:node app.js ./
+
+# /data برای کلیدهای پایدار (اختیاری): API_KEYS_FILE=/data/api-keys.json + یک volume
+RUN mkdir -p /data && chown -R node:node /data
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "app.js"]

@@ -60,13 +60,15 @@
 
 | Model ID | نام نمایشی | سازنده | گروه پیکر | نقش پیشنهادی |
 |---|---|---|---|---|
-| `claude-fable-5.1` | Claude Fable 5.1 | Anthropic | Claude Pro | **پیش‌فرض** — تعادل کف کیفیت برای کار عمومی |
-| `claude-sonnet-5` | Claude Sonnet 5 | Anthropic | Claude Pro | کدنویسی و استدلال ساخت‌یافته |
+| `claude-opus-5.5` | Claude Opus 5.5 | Anthropic | Claude Pro | 🆕 پرچم‌دار — پیچیده‌ترین کدنویسی و کارهای agentic |
+| `claude-sonnet-5` | Claude Sonnet 5.5 | Anthropic | Claude Pro | **پیش‌فرض** (اکتبر ۲۰۲۶) — استدلال با extended thinking |
 | `claude-fable-5` | Claude Fable 5 | Anthropic | Claude Pro | نگارش خلاق و روایت |
+| `claude-fable-5.1` | Claude Fable 5.1 | Anthropic | Claude Pro | نگارش خلاق + پژوهش (پیش‌فرض قدیمی) |
 | `sol`   | GPT 5.6 Sol | OpenAI | ChatGPT Pro | پاسخ سریع و محاوره‌ای |
 | `terra` | GPT 5.6 Terra | OpenAI | ChatGPT Pro | تحلیل چندمرحله‌ای و داده |
 | `glm-5.2` | GLM 5.2 | Z.AI | Other Pro Models | چندزبانه و کار سبک |
 | `kimi-k3` | Kimi K3 | Moonshot AI | Other Pro Models | متون بلند و جمع‌بندی |
+| `gpt-6-astra` | GPT 6 Astra | OpenAI | ChatGPT Pro | 🆕 پرچم‌دار reasoning-first برای کدنویسی/ریاضی/علوم |
 
 ### 3.2 نرمال‌سازی نام مدل (resolveModelId)
 
@@ -119,7 +121,7 @@ Authorization: Bearer <key>
 
 ### 5.2 GET /v1/models
 
-لیست استاندارد OpenAI با ۷ مدل و `owned_by=freemodels-anthropic|openai|z.ai|moonshot-ai`. **عمومی و بدون کلید** — چون کلاینت‌ها هنگام Model Discovery معمولاً کلید نمی‌فرستند (اندپوینت‌های چت همچنان کلید می‌خواهند). نمونه:
+لیست استاندارد OpenAI با ۹ مدل و `owned_by=freemodels-anthropic|openai|z.ai|moonshot-ai`. **عمومی و بدون کلید** — چون کلاینت‌ها هنگام Model Discovery معمولاً کلید نمی‌فرستند (اندپوینت‌های چت همچنان کلید می‌خواهند). نمونه:
 
 ```bash
 curl -s http://localhost:3000/v1/models
@@ -274,7 +276,7 @@ GET /api/keys → {openai, anthropic}   (فقط Next؛ app.js با window.__FM__
 ```bash
 K="sk-ItqvFVBt8slw2vqxPuW9oLiSyGGgC29lNYeET64dIzJ04e50"; A="sk-ant-api03-9lamB2K7KoYT8fw8tAp2CKL5kKsOHKhN4mE9eawuzRuW0aU3umJirsEFbS3B6RCjLRw8lrJ0YRmsnxECIu3nHaKM"; B=http://localhost:3000
 curl -s $B/api/ping                                                # ۱ سلامت آپستریم
-curl -s $B/v1/models | head -c 400                                 # ۲ لیست ۷ مدل (عمومی — بدون کلید)
+curl -s $B/v1/models | head -c 400                                 # ۲ لیست ۹ مدل (عمومی — بدون کلید)
 curl -s $B/v1/chat/completions -H "Content-Type: application/json" \
   -d '{"model":"kimi-k3","messages":[]}' | head -c 200             # ۳ 401 بدون کلید
 curl -sN $B/v1/chat/completions -H "Authorization: Bearer $K" -H "Content-Type: application/json" \

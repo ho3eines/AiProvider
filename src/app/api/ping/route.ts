@@ -17,7 +17,7 @@ export async function GET() {
   const started = Date.now();
   const body = JSON.stringify({
     messages: [{ role: 'user', content: 'ping' }],
-    modelId: 'claude-fable-5.1',
+    modelId: 'claude-sonnet-5',
     thinking: false,
     deepSearch: false,
     stream: false,

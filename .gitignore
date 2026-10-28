@@ -52,3 +52,22 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# ── رازها و فایل‌های تولیدشده در زمان اجرا ──
+# کلیدهای API هرگز commit نشوند (الگو: api-keys.example.json)
+api-keys.json
+# دیتای پایدار کانتینر (وُلوم کلیدها)
+/data/
+# override شخصی docker compose
+docker-compose.override.yml
+# لاگ/خروجی ابزارهای کمکی
+.zscripts/dev.pid
+
+# ── Cloudflare Workers / Pages ──
+# رازهای محلی wrangler dev
+cloudflare/.dev.vars
+.dev.vars
+# کش/خروجی wrangler
+.wrangler/
+cloudflare/.bundle-tmp/
+cloudflare/pages-dist/

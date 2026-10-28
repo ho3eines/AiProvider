@@ -3,6 +3,8 @@
  * این لیست هم در UI (پیکر مدل) و هم در اندپوینت‌های /v1 استفاده می‌شود.
  * ⚠️ ID واقعی مدل‌های GPT فقط «sol» و «terra» است (نه gpt-5.6-sol/gpt-5.6-terra) —
  * اگر ID ناشناس بفرستیم آپستریم بی‌سروصدا به مدل پیش‌فرض (Claude) fallback می‌کند.
+ * بروزرسانی اکتبر ۲۰۲۶: دو مدل جدید claude-opus-5.5 و gpt-6-astra اضافه شدند و
+ * نام نمایشی claude-sonnet-5 به «Claude Sonnet 5.5» تغییر کرد (ID همان قبلی است).
  */
 export interface FmModel {
   id: string;
@@ -12,16 +14,18 @@ export interface FmModel {
 }
 
 export const FM_MODELS: FmModel[] = [
-  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic',   group: 'Claude Pro' },
+  { id: 'claude-opus-5.5',  name: 'Claude Opus 5.5',  vendor: 'Anthropic',   group: 'Claude Pro' },
+  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5.5', vendor: 'Anthropic',  group: 'Claude Pro' },
   { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic',   group: 'Claude Pro' },
   { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic',   group: 'Claude Pro' },
   { id: 'sol',              name: 'GPT 5.6 Sol',      vendor: 'OpenAI',      group: 'ChatGPT Pro' },
   { id: 'terra',            name: 'GPT 5.6 Terra',    vendor: 'OpenAI',      group: 'ChatGPT Pro' },
   { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI',        group: 'Other Pro Models' },
   { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI', group: 'Other Pro Models' },
+  { id: 'gpt-6-astra',      name: 'GPT 6 Astra',      vendor: 'OpenAI',      group: 'ChatGPT Pro' },
 ];
 
-export const DEFAULT_MODEL_ID = 'claude-fable-5.1'; // مدل پیش‌فرض (انتخاب‌شده در سایت)
+export const DEFAULT_MODEL_ID = 'claude-sonnet-5'; // مدل پیش‌فرض (انتخاب‌شده در سایت — اکتبر ۲۰۲۶)
 
 /** IDهای قدیمی اشتباه (قبل از کشف ID واقعی سایت) → ID درست — برای سازگاری با کلاینت‌های موجود */
 const LEGACY_ALIASES: Record<string, string> = {

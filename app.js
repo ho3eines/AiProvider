@@ -4,9 +4,12 @@
  *  چت هوشمند — نسخهٔ تک‌فایل Node.js خالص (بدون هیچ وابستگی خارجی)
  * ─────────────────────────────────────────────────────────────────────────────
  *  اجرا:  node app.js          (پورت پیش‌فرض 3000 — با متغیر محیطی PORT قابل تغییر)
+ *          HOST=0.0.0.0 پیش‌فرض است (برای Docker/Railway لازم است)؛ برای اجرای
+ *          فقط-محلی:  HOST=127.0.0.1 node app.js
  *
  *  روت‌ها:
  *    GET  /                    → صفحهٔ HTML چت (فارسی، RTL، تم تاریک)
+ *    GET  /healthz             → بررسی سلامت سبک (بدون تماس با آپستریم) — برای Docker/Railway
  *    POST /api/chat            → پروکسی استریم به آپستریم (SSE زنده، pipe مستقیم)
  *    GET  /api/ping            → تست اتصال به آپستریم → {status, ms, sample}
  *    GET  /v1/models           → لیست مدل‌ها (فرمت OpenAI — عمومی، بدون کلید)
@@ -14,6 +17,14 @@
  *    POST /v1/messages         → اندپوینت سازگار Anthropic (استریم + غیراستریم)
  *    OPTIONS *                 → 204 با هدرهای CORS باز
  *    بقیه                      → 404
+ *
+ *  متغیرهای محیطی:
+ *    PORT              پورت گوش‌دادن (پیش‌فرض 3000) — Railway آن را تزریق می‌کند
+ *    HOST              آدرس bind (پیش‌فرض 0.0.0.0)
+ *    OPENAI_API_KEY    کلید سبک OpenAI (override فایل کلیدها)
+ *    ANTHROPIC_API_KEY کلید سبک Anthropic (override فایل کلیدها)
+ *    API_KEYS_FILE     مسیر فایل کلیدها (پیش‌فرض: کنار همین فایل)
+ *    EXPOSE_KEYS=false ماسک‌کردن کلیدها در UI (برای استقرار عمومی)
  *
  *  کلیدهای API (طبق قوانین OpenAI و Anthropic): اولین اجرا ساخته و در
  *  api-keys.json کنار همین فایل ذخیره می‌شوند — در بنر اجرا و ⚙️ تنظیمات هم هست.
@@ -32,7 +43,8 @@ const path = require('path');
 const crypto = require('crypto');
 
 /* ---------- ثابت‌های آپستریم (پورت از src/lib/upstream.ts) ---------- */
-const UPSTREAM_URL = 'https://freemodels-chat.freemodels.workers.dev/';
+/* با UPSTREAM_URL قابل override است (مثلاً برای تست با cloudflare/mock-upstream.mjs) */
+const UPSTREAM_URL = (String(process.env.UPSTREAM_URL || '').trim()) || 'https://freemodels-chat.freemodels.workers.dev/';
 const MAX_BODY_BYTES = 5 * 1024 * 1024; // حداکثر حجم بدنهٔ درخواست: ۵ مگابایت
 const UPSTREAM_TIMEOUT_MS = 180 * 1000; // تایم‌اوت آپستریم: ۱۸۰ ثانیه
 
@@ -64,15 +76,17 @@ const OPEN_CORS = {
 
 /* ---------- مدل‌های سرویس freemodels (طبق سایت) ---------- */
 const FM_MODELS = [
-  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
+  { id: 'claude-opus-5.5',  name: 'Claude Opus 5.5',  vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
+  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5.5', vendor: 'Anthropic',  group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
   { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
   { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
   { id: 'sol',              name: 'GPT 5.6 Sol',      vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
   { id: 'terra',            name: 'GPT 5.6 Terra',    vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
   { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI',        group: 'Other Pro Models', logo: '/zai.png' },
   { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI', group: 'Other Pro Models', logo: '/kimi-logo-png_seeklogo-611650.png' },
+  { id: 'gpt-6-astra',      name: 'GPT 6 Astra',      vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
 ];
-const DEFAULT_MODEL_ID = 'claude-fable-5.1'; // مدل پیش‌فرض (انتخاب‌شده در سایت)
+const DEFAULT_MODEL_ID = 'claude-sonnet-5'; // مدل پیش‌فرض (انتخاب‌شده در سایت — اکتبر ۲۰۲۶)
 
 /* IDهای قدیمی اشتباه (قبل از کشف ID واقعی سایت از باندل freemodels.pro) → ID درست.
    اگر ID ناشناس به آپستریم برود، بی‌سروصدا به مدل پیش‌فرض (Claude) fallback می‌کند! */
@@ -101,7 +115,34 @@ function resolveModelId(input) {
    اولین اجرا: ساخته و در api-keys.json کنار همین فایل ذخیره می‌شود؛
    اجراهای بعدی همان‌ها لود می‌شوند. با env هم قابل تعیین دستی است:
    OPENAI_API_KEY / ANTHROPIC_API_KEY */
-const KEY_FILE = path.join(__dirname, 'api-keys.json');
+/* نکته: __dirname در باندل Cloudflare Worker وجود ندارد؛ پس با try/catch محافظت می‌شود
+   (در Worker اصلاً به فایل کلیدها نمی‌رسیم — کلیدها از Secret/KV می‌آیند). */
+const KEY_FILE = (() => {
+  try {
+    const base = typeof __dirname === 'string' ? __dirname : '.';
+    return process.env.API_KEYS_FILE
+      ? (path.isAbsolute(process.env.API_KEYS_FILE)
+          ? process.env.API_KEYS_FILE
+          : path.resolve(base, process.env.API_KEYS_FILE))
+      : path.join(base, 'api-keys.json');
+  } catch (e) {
+    return 'api-keys.json';
+  }
+})();
+
+/** آیا کلیدها در UI/بنر نمایش داده شوند؟ (EXPOSE_KEYS=false → ماسک) */
+function keysExposed() {
+  var v = String(process.env.EXPOSE_KEYS == null ? '' : process.env.EXPOSE_KEYS).trim().toLowerCase();
+  if (!v) return true;
+  return !(v === 'false' || v === '0' || v === 'no' || v === 'off');
+}
+
+/** نمایش امن کلید: sk-abcd••••••••wxyz */
+function maskKey(k) {
+  if (!k) return '';
+  if (k.length <= 12) return '•'.repeat(k.length);
+  return k.slice(0, 8) + '••••••••••' + k.slice(-4);
+}
 
 function randomToken(len, alphabet) {
   const abc = alphabet || 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -111,37 +152,68 @@ function randomToken(len, alphabet) {
   return s;
 }
 
+/**
+ * آیا مقدار «کلید واقعی» است؟ placeholder ها (مثل sk-REPLACE_WITH_...) رد می‌شوند
+ * تا هیچ‌وقت یک کلید قابل حدس جای کلید تصادفی امن را نگیرد.
+ */
+function isUsableKey(k) {
+  if (!k || typeof k !== 'string') return false;
+  var v = k.trim();
+  return v.length >= 16 && !/REPLACE|CHANGE_?ME|xxxx+/i.test(v);
+}
+
 function loadOrCreateKeys() {
   const envOpen = (process.env.OPENAI_API_KEY || '').trim();
   const envAnt = (process.env.ANTHROPIC_API_KEY || '').trim();
+  const useEnvOpen = isUsableKey(envOpen);
+  const useEnvAnt = isUsableKey(envAnt);
   try {
     if (fs.existsSync(KEY_FILE)) {
       const j = JSON.parse(fs.readFileSync(KEY_FILE, 'utf8'));
-      if (j && typeof j.openai === 'string' && typeof j.anthropic === 'string' && j.openai && j.anthropic) {
-        return { openai: envOpen || j.openai, anthropic: envAnt || j.anthropic };
+      if (j && isUsableKey(j.openai) && isUsableKey(j.anthropic)) {
+        return {
+          openai: useEnvOpen ? envOpen : j.openai,
+          anthropic: useEnvAnt ? envAnt : j.anthropic,
+        };
       }
     }
   } catch (e) {
     /* فایل خراب — دوباره می‌سازیم */
   }
   const fresh = {
-    openai: envOpen || ('sk-' + randomToken(48)),
-    anthropic: envAnt || ('sk-ant-api03-' + randomToken(88)),
+    openai: useEnvOpen ? envOpen : ('sk-' + randomToken(48)),
+    anthropic: useEnvAnt ? envAnt : ('sk-ant-api03-' + randomToken(88)),
     createdAt: new Date().toISOString(),
   };
+  let persisted = false;
   try {
     fs.writeFileSync(KEY_FILE, JSON.stringify(fresh, null, 2) + '\n', { mode: 0o600 });
+    persisted = true;
   } catch (e) {
     /* فایل‌سیستم اجازه نداد — کلیدها فقط تا پایان اجرا در حافظه می‌مانند */
+  }
+  console.log('[api-keys] منبع کلیدها: ' + (useEnvOpen && useEnvAnt ? 'env (OPENAI_API_KEY + ANTHROPIC_API_KEY)' : persisted ? 'ساخته/خوانده‌شده از ' + KEY_FILE : 'حافظه (تصادفی — فایل قابل نوشتن نبود)'));
+  if (!(useEnvOpen && useEnvAnt)) {
+    console.log('[api-keys] برای پایداری بین ری‌استارت/دیپلوی اینها را در env بگذارید:');
+    console.log('           OPENAI_API_KEY=' + fresh.openai);
+    console.log('           ANTHROPIC_API_KEY=' + fresh.anthropic);
   }
   return { openai: fresh.openai, anthropic: fresh.anthropic };
 }
 
-const API_KEYS = loadOrCreateKeys();
+/* تنبل (lazy): کلیدها فقط وقتی لازم شوند خوانده/ساخته می‌شوند.
+   چرا؟ چون cloudflare/worker.mjs این فایل را import می‌کند و در Worker نه fs هست
+   نه باید کلید تصادفی در لاگ‌ها چاپ شود — آنجا کلیدها از Secret/KV می‌آیند. */
+let _API_KEYS = null;
+function getApiKeys() {
+  if (!_API_KEYS) _API_KEYS = loadOrCreateKeys();
+  return _API_KEYS;
+}
 
 /** اعتبارسنجی کلید — هر دو کلید روی هر دو اندپوینت پذیرفته می‌شوند */
 function keyIsValid(k) {
-  return !!k && (k === API_KEYS.openai || k === API_KEYS.anthropic);
+  const K = getApiKeys();
+  return !!k && (k === K.openai || k === K.anthropic);
 }
 
 /* ---------- لاگ رنگی ANSI کنسول ---------- */
@@ -435,15 +507,17 @@ const PAGE_JS = String.raw`
 
 /* ================= ثابت‌ها ================= */
 var MODELS = [
-  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
+  { id: 'claude-opus-5.5',  name: 'Claude Opus 5.5',  vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
+  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5.5', vendor: 'Anthropic',  group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
   { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
   { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
   { id: 'sol',              name: 'GPT 5.6 Sol',      vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
   { id: 'terra',            name: 'GPT 5.6 Terra',    vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
   { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI',        group: 'Other Pro Models', logo: '/zai.png' },
-  { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI', group: 'Other Pro Models', logo: '/kimi-logo-png_seeklogo-611650.png' }
+  { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI', group: 'Other Pro Models', logo: '/kimi-logo-png_seeklogo-611650.png' },
+  { id: 'gpt-6-astra',      name: 'GPT 6 Astra',      vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' }
 ];
-var DEFAULT_SETTINGS = { modelId: 'claude-fable-5.1', thinking: false, deepSearch: false, stream: true, systemPrompt: '' };
+var DEFAULT_SETTINGS = { modelId: 'claude-sonnet-5', thinking: false, deepSearch: false, stream: true, systemPrompt: '' };
 var MAX_RAW_LOG = 80 * 1024; // پنل Raw SSE: نگه‌داری آخرین ~80KB
 
 var SUGGESTIONS = [
@@ -1643,7 +1717,7 @@ function renderApiInfo() {
   var openaiKey = FM.openaiKey || '—';
   var anthropicKey = FM.anthropicKey || '—';
   var base = window.location.origin;
-  var model = (settings.modelId || FM.defaultModel || 'claude-fable-5.1').trim() || 'claude-fable-5.1';
+  var model = (settings.modelId || FM.defaultModel || DEFAULT_MODEL_ID).trim() || DEFAULT_MODEL_ID;
 
   var ko = $('key-openai');
   var ka = $('key-anthropic');
@@ -1671,11 +1745,18 @@ function renderApiInfo() {
 
   var b1 = $('btn-key-openai');
   var b2 = $('btn-key-anthropic');
+  var exposed = FM.keysExposed !== false;
+  if (!exposed) {
+    if (b1) { b1.disabled = true; b1.textContent = 'مخفی'; b1.title = 'EXPOSE_KEYS=false'; }
+    if (b2) { b2.disabled = true; b2.textContent = 'مخفی'; b2.title = 'EXPOSE_KEYS=false'; }
+  }
   if (b1) b1.addEventListener('click', async function () {
+    if (!exposed) return;
     var ok = await copyText(openaiKey);
     if (ok) { b1.textContent = 'کپی شد ✓'; setTimeout(function () { b1.textContent = 'کپی'; }, 1500); }
   });
   if (b2) b2.addEventListener('click', async function () {
+    if (!exposed) return;
     var ok = await copyText(anthropicKey);
     if (ok) { b2.textContent = 'کپی شد ✓'; setTimeout(function () { b2.textContent = 'کپی'; }, 1500); }
   });
@@ -1946,14 +2027,22 @@ if (document.readyState === 'loading') {
    صفحهٔ HTML (ترکیب CSS و JS بالا)
    ═══════════════════════════════════════════════════════════════════════════ */
 /* دیتای تزریق‌شده به کلاینت (مدل‌ها + کلیدهای API برای بخش ⚙️ تنظیمات) */
-const SERVER_DATA_JSON = JSON.stringify({
-  models: FM_MODELS,
-  defaultModel: DEFAULT_MODEL_ID,
-  openaiKey: API_KEYS.openai,
-  anthropicKey: API_KEYS.anthropic,
-});
+function serverDataJson(keys, exposed) {
+  return JSON.stringify({
+    models: FM_MODELS,
+    defaultModel: DEFAULT_MODEL_ID,
+    openaiKey: exposed ? keys.openai : maskKey(keys.openai),
+    anthropicKey: exposed ? keys.anthropic : maskKey(keys.anthropic),
+    keysExposed: exposed,
+  });
+}
+const KEYS_EXPOSED = keysExposed();
 
-const PAGE_HTML = `<!DOCTYPE html>
+/* سازندهٔ HTML صفحه.
+   چرا تابع و نه ثابت؟ تا نسخهٔ Cloudflare Worker (cloudflare/worker.mjs) بتواند همان
+   UI را با کلیدهای زمان‌اجرا (Secret/KV) سرو کند بدون اینکه کلیدها در بیلد baked شوند. */
+function buildPageHtml(serverData) {
+  return `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8">
@@ -2081,22 +2170,36 @@ ${PAGE_CSS}
 
 </div>
 <script>
-window.__FM__ = ${SERVER_DATA_JSON};
+window.__FM__ = ${serverData};
 </script>
 <script>
 ${PAGE_JS}
 </script>
 </body>
 </html>`;
+}
+
+/* نسخهٔ آمادهٔ Node (memoized) — کلیدها از env یا api-keys.json خوانده می‌شوند.
+   نسخهٔ Worker خودش buildPageHtml را با کلیدهای زمان‌اجرا (Secret/KV) صدا می‌زند. */
+let _PAGE_HTML = null;
+function pageHtml() {
+  if (_PAGE_HTML === null) _PAGE_HTML = buildPageHtml(serverDataJson(getApiKeys(), KEYS_EXPOSED));
+  return _PAGE_HTML;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    سرور HTTP — روت‌ها و پروکسی آپستریم
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/** ماژول درست بر اساس پروتکل UPSTREAM_URL (http فقط برای تست با mock محلی) */
+function httpModuleFor(url) {
+  return /^http:\/\//i.test(String(url)) ? http : https;
+}
+
 /** باز کردن درخواست POST به آپستریم با هدرهای جعلی؛ همان لحظهٔ رسیدن هدرها resolve می‌شود */
 function openUpstream(body, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const req = https.request(
+    const req = httpModuleFor(UPSTREAM_URL).request(
       UPSTREAM_URL,
       {
         method: 'POST',
@@ -2153,8 +2256,9 @@ function sendJson(res, status, obj) {
 /** GET / — صفحهٔ چت */
 function handleHome(res) {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-  res.end(PAGE_HTML);
-  logReq('green', 'GET / → 200 HTML (' + Buffer.byteLength(PAGE_HTML, 'utf8') + ' bytes)');
+  const html = pageHtml();
+  res.end(html);
+  logReq('green', 'GET / → 200 HTML (' + Buffer.byteLength(html, 'utf8') + ' bytes)');
 }
 
 /* ---------- POST /api/chat — پروکسی استریم ---------- */
@@ -2296,7 +2400,7 @@ function handlePing(res) {
     stream: false,
   });
 
-  const upReq = https.request(
+  const upReq = httpModuleFor(UPSTREAM_URL).request(
     UPSTREAM_URL,
     {
       method: 'POST',
@@ -3000,9 +3104,43 @@ async function handleAnthropic(req, res) {
 
 /* ---------- سرور اصلی و مسیریابی ---------- */
 const PORT = parseInt(process.env.PORT || '3000', 10) || 3000;
-const HOST = '127.0.0.1';
+/* پیش‌فرض 0.0.0.0 است تا داخل Docker/Railway قابل دسترس باشد (HOST=127.0.0.1 برای فقط-محلی) */
+const HOST = (process.env.HOST || '0.0.0.0').trim() || '0.0.0.0';
+const STARTED_AT = Date.now();
 
-const server = http.createServer((req, res) => {
+/* ---------- GET /healthz — سلامت سبک (بدون تماس با آپستریم) ---------- */
+function handleHealthz(res, headOnly) {
+  const body = JSON.stringify({
+    status: 'ok',
+    service: 'smart-chat',
+    runtime: 'single-file-node',
+    uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000),
+    node: process.version,
+    models: FM_MODELS.length,
+    defaultModel: DEFAULT_MODEL_ID,
+    upstream: UPSTREAM_URL,
+    keysExposed: keysExposed(),
+    timestamp: new Date().toISOString(),
+  });
+  res.writeHead(200, Object.assign({
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': String(Buffer.byteLength(body, 'utf8')),
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+  }, OPEN_CORS));
+  res.end(headOnly ? undefined : body);
+}
+
+/* ── آیا این فایل «مستقیماً» اجرا شده (node app.js) یا فقط import شده است؟
+   نسخهٔ Cloudflare Worker (cloudflare/worker.mjs) همین فایل را import می‌کند تا از
+   UI/مدل‌ها/پارسر SSE استفاده کند؛ در آن حالت هیچ سرور Node بالا نمی‌آید. ── */
+const RUN_AS_SERVER =
+  typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module;
+
+/* هندلر به‌صورت «تابع» تعریف می‌شود (نه اینکه همین‌جا createServer صدا زده شود):
+   وقتی cloudflare/worker.mjs این فایل را import می‌کند، نباید حتی یک‌بار هم
+   node:http لمس شود — باندلر Pages آن را با unenv جایگزین می‌کند و createServer
+   در unenv پیاده‌سازی نشده (خطا: "http.createServer is not implemented yet!"). */
+function handleNodeRequest(req, res) {
   const path = (req.url || '/').split('?')[0];
 
   /* هر OPTIONS → 204 با CORS باز */
@@ -3043,6 +3181,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /* سلامت سبک برای Docker/Railway (بدون تماس با آپستریم) */
+  if ((req.method === 'GET' || req.method === 'HEAD') && (path === '/healthz' || path === '/health')) {
+    handleHealthz(res, req.method === 'HEAD');
+    return;
+  }
+
   /* ─── اندپوینت‌های سازگار OpenAI و Anthropic ─── */
   if (req.method === 'GET' && path === '/v1/models') {
     handleModels(req, res);
@@ -3061,30 +3205,81 @@ const server = http.createServer((req, res) => {
   res.writeHead(404, Object.assign({ 'Content-Type': 'text/plain; charset=utf-8' }, OPEN_CORS));
   res.end('404 — مسیر یافت نشد');
   logReq('yellow', req.method + ' ' + path + ' → 404');
-});
+}
 
-/* مقاوم‌سازی: هیچ خطایی نباید پروسه را بیندازد */
-process.on('uncaughtException', (err) => logReq('red', 'uncaughtException: ' + ((err && err.message) || err)));
-process.on('unhandledRejection', (err) => logReq('red', 'unhandledRejection: ' + ((err && err.message) || err)));
+/* ── فقط وقتی مستقیماً اجرا شده باشد: سرور + هندلرهای خطا + بنر ── */
+if (RUN_AS_SERVER) {
+  const server = http.createServer(handleNodeRequest);
 
-/* ---------- بنر خوش‌آمد رنگی ---------- */
-server.listen(PORT, HOST, () => {
+  /* مقاوم‌سازی: هیچ خطایی نباید پروسه را بیندازد */
+  process.on('uncaughtException', (err) => logReq('red', 'uncaughtException: ' + ((err && err.message) || err)));
+  process.on('unhandledRejection', (err) => logReq('red', 'unhandledRejection: ' + ((err && err.message) || err)));
+
+  /* ---------- بنر خوش‌آمد رنگی ---------- */
+  server.listen(PORT, HOST, () => {
   const line = '─'.repeat(52);
   console.log('');
   console.log(C.dim + '┌' + line + '┐' + C.reset);
   console.log('  \x1b[1;36m⚡ چت هوشمند\x1b[0m — \x1b[1;37mنسخهٔ تک‌فایل Node.js\x1b[0m');
   console.log(C.dim + '└' + line + '┘' + C.reset);
-  console.log('   \x1b[32m●\x1b[0m آدرس محلی : \x1b[1;34mhttp://127.0.0.1:' + PORT + '/\x1b[0m');
-  console.log('   \x1b[32m●\x1b[0m پورت      : \x1b[33m' + PORT + '\x1b[0m \x1b[2m(متغیر محیطی PORT)\x1b[0m');
+  const K = getApiKeys();
+  const localHost = (HOST === '0.0.0.0' || HOST === '::') ? '127.0.0.1' : HOST;
+  console.log('   \x1b[32m●\x1b[0m آدرس محلی : \x1b[1;34mhttp://' + localHost + ':' + PORT + '/\x1b[0m');
+  console.log('   \x1b[32m●\x1b[0m bind       : \x1b[33m' + HOST + ':' + PORT + '\x1b[0m \x1b[2m(متغیرهای محیطی HOST و PORT)\x1b[0m');
+  console.log('   \x1b[32m●\x1b[0m سلامت     : \x1b[1;34mGET /healthz\x1b[0m \x1b[2m(بدون تماس با آپستریم)\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m آپستریم   : \x1b[2m' + UPSTREAM_URL + '\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m مدل‌ها     : \x1b[2m' + FM_MODELS.map((m) => m.id).join(' · ') + '\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m OpenAI API: \x1b[1;34mPOST /v1/chat/completions\x1b[0m \x1b[2m| GET /v1/models\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m Anthropic : \x1b[1;34mPOST /v1/messages\x1b[0m \x1b[2m(سازگار SDK آنتروپیک)\x1b[0m');
   console.log('   \x1b[32m●\x1b[0m زمان شروع : \x1b[2m' + new Date().toLocaleString('en-GB') + '\x1b[0m');
   console.log('');
-  console.log('   \x1b[1;33m🔑 کلید OpenAI   (Authorization: Bearer):\x1b[0m ' + API_KEYS.openai);
-  console.log('   \x1b[1;33m🔑 کلید Anthropic (x-api-key):\x1b[0m           ' + API_KEYS.anthropic);
+  if (KEYS_EXPOSED) {
+    console.log('   \x1b[1;33m🔑 کلید OpenAI   (Authorization: Bearer):\x1b[0m ' + K.openai);
+    console.log('   \x1b[1;33m🔑 کلید Anthropic (x-api-key):\x1b[0m           ' + K.anthropic);
+  } else {
+    console.log('   \x1b[1;33m🔑 کلید OpenAI   (Authorization: Bearer):\x1b[0m ' + maskKey(K.openai) + '  \x1b[2m(ماسک‌شده: EXPOSE_KEYS=false)\x1b[0m');
+    console.log('   \x1b[1;33m🔑 کلید Anthropic (x-api-key):\x1b[0m           ' + maskKey(K.anthropic) + '  \x1b[2m(ماسک‌شده: EXPOSE_KEYS=false)\x1b[0m');
+  }
   console.log('   \x1b[2mفایل کلیدها: ' + KEY_FILE + '\x1b[0m');
   console.log('');
   logReq('green', 'سرور روی ' + HOST + ':' + PORT + ' آماده است ✓');
-});
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   exports — برای cloudflare/worker.mjs (نسخهٔ Cloudflare Workers/Pages)
+   همهٔ بخش‌های «خالص» (بدون fs/http) اینجا صادر می‌شوند تا منطق UI، مدل‌ها،
+   پارسر SSE و تبدیل payload بین Node و Worker یکسان بماند (single source of truth).
+   ═══════════════════════════════════════════════════════════════════════════ */
+module.exports = {
+  /* UI */
+  buildPageHtml,
+  serverDataJson,
+  pageHtml,
+  PAGE_CSS,
+  PAGE_JS,
+  EMBEDDED_LOGOS,
+  /* مدل‌ها */
+  FM_MODELS,
+  DEFAULT_MODEL_ID,
+  LEGACY_MODEL_ALIASES,
+  BOOT_AT,
+  resolveModelId,
+  /* آپستریم */
+  UPSTREAM_URL,
+  UPSTREAM_TIMEOUT_MS,
+  MAX_BODY_BYTES,
+  SPOOFED_HEADERS,
+  OPEN_CORS,
+  /* پارسر/تبدیل‌ها */
+  makeUpstreamParser,
+  collectUpstreamText,
+  flattenContent,
+  /* کلیدها */
+  getApiKeys,
+  maskKey,
+  randomToken,
+  isUsableKey,
+  keyIsValid,
+  keysExposed,
+};

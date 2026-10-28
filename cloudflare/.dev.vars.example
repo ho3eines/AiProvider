@@ -1,0 +1,13 @@
+# الگوی متغیرهای محلی `wrangler dev` — این فایل را به cloudflare/.dev.vars کپی کنید.
+# ⚠️ .dev.vars هرگز commit نمی‌شود (در .gitignore هست).
+
+# کلیدهای API خودِ این سرویس (همان نقش OPENAI_API_KEY در نسخهٔ Node/Railway)
+OPENAI_API_KEY=sk-local-dev-0123456789abcdef
+ANTHROPIC_API_KEY=sk-ant-api03-local-dev-0123456789abcdef
+
+# نمایش کلیدها در مودال ⚙️ تنظیمات UI (در دیپلوی واقعی false بگذارید)
+EXPOSE_KEYS=true
+
+# برای تست بدون اینترنت/آپستریم واقعی، به mock محلی اشاره کنید:
+# UPSTREAM_URL=http://127.0.0.1:9912/
+UPSTREAM_URL=https://freemodels-chat.freemodels.workers.dev/

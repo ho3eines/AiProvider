@@ -50,13 +50,15 @@ interface Settings {
 /* ---------- ثابت‌ها ---------- */
 /* مدل‌ها با گروه و لوگو — دقیقاً مطابق پیکر مدل سایت freemodels */
 const MODELS = [
-  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
+  { id: 'claude-opus-5.5',  name: 'Claude Opus 5.5',  vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
+  { id: 'claude-sonnet-5',  name: 'Claude Sonnet 5.5', vendor: 'Anthropic',  group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
   { id: 'claude-fable-5',   name: 'Claude Fable 5',   vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
   { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', vendor: 'Anthropic',   group: 'Claude Pro',       logo: '/Claude-ai-logo.webp' },
   { id: 'sol',              name: 'GPT 5.6 Sol',      vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
   { id: 'terra',            name: 'GPT 5.6 Terra',    vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
   { id: 'glm-5.2',          name: 'GLM 5.2',          vendor: 'Z.AI',        group: 'Other Pro Models', logo: '/zai.png' },
   { id: 'kimi-k3',          name: 'Kimi K3',          vendor: 'Moonshot AI', group: 'Other Pro Models', logo: '/kimi-logo-png_seeklogo-611650.png' },
+  { id: 'gpt-6-astra',      name: 'GPT 6 Astra',      vendor: 'OpenAI',      group: 'ChatGPT Pro',      logo: '/ChatGPT-Logo.svg.webp' },
 ];
 /* گروه‌های پیکر مدل به‌ترتیب نمایش (آیکن هر گروه مثل سایت) */
 const MODEL_GROUPS: Array<{ title: string; icon: LucideIcon }> = [
@@ -65,7 +67,7 @@ const MODEL_GROUPS: Array<{ title: string; icon: LucideIcon }> = [
   { title: 'Other Pro Models', icon: Globe },
 ];
 const DEFAULT_SETTINGS: Settings = {
-  modelId: 'claude-fable-5.1',
+  modelId: 'claude-sonnet-5',
   thinking: false,
   deepSearch: false,
   stream: true,
@@ -417,7 +419,7 @@ export default function ChatApp() {
   const [draftPrompt, setDraftPrompt] = useState('');
   const [toasts, setToasts] = useState<Array<{ id: number; text: string; kind: 'ok' | 'err' }>>([]);
   const [rawBytes, setRawBytes] = useState(0);
-  const [apiKeys, setApiKeys] = useState<{ openai: string; anthropic: string } | null>(null);
+  const [apiKeys, setApiKeys] = useState<{ openai: string; anthropic: string; exposed?: boolean } | null>(null);
   const [modelPickerOpen, setModelPickerOpen] = useState(false); // پیکر مدل باز است؟
 
   /* ----- refs ----- */
@@ -462,7 +464,7 @@ export default function ChatApp() {
     if (!settingsOpen || apiKeys) return;
     fetch('/api/keys')
       .then((r) => r.json())
-      .then((j) => setApiKeys({ openai: j.openai || '', anthropic: j.anthropic || '' }))
+      .then((j) => setApiKeys({ openai: j.openai || '', anthropic: j.anthropic || '', exposed: j.exposed !== false }))
       .catch(() => {});
   }, [settingsOpen, apiKeys]);
 
@@ -1448,7 +1450,15 @@ export default function ChatApp() {
             <div className="space-y-2 border-t border-dashed border-[#243352] pt-4">
               <h4 className="flex items-center gap-1.5 text-sm font-extrabold text-[#38bdf8]">🔑 اندپوینت‌های API و کلیدها</h4>
               <p className="text-[11px] leading-6 text-slate-500">
-                این سرور هم‌زمان API سازگار با OpenAI و Anthropic ارائه می‌دهد؛ کلیدها در فایل api-keys.json ذخیره شده‌اند.
+                این سرور هم‌زمان API سازگار با OpenAI و Anthropic ارائه می‌دهد.
+                {apiKeys?.exposed === false ? (
+                  <>
+                    {' '}کلیدها در این استقرار مخفی‌اند (<code className="md-icode">EXPOSE_KEYS=false</code>) — مقدار واقعی را
+                    از متغیرهای محیطی سرویس (مثلاً Railway) بخوانید.
+                  </>
+                ) : (
+                  <> کلیدها از <code className="md-icode">api-keys.json</code> یا متغیرهای محیطی خوانده می‌شوند.</>
+                )}
               </p>
               {(['openai', 'anthropic'] as const).map((kind) => (
                 <div
@@ -1466,12 +1476,13 @@ export default function ChatApp() {
                   </code>
                   <button
                     type="button"
+                    disabled={apiKeys?.exposed === false}
                     onClick={async () => {
-                      if (!apiKeys) return;
+                      if (!apiKeys || apiKeys.exposed === false) return;
                       const ok = await copyText(apiKeys[kind]);
                       toast(ok ? 'کلید کپی شد ✓' : 'کپی ناموفق بود', ok ? 'ok' : 'err');
                     }}
-                    className="shrink-0 rounded-lg border border-[#243352] px-2.5 py-1 text-[11px] text-slate-300 hover:border-[#38bdf8] hover:text-[#38bdf8]"
+                    className="shrink-0 rounded-lg border border-[#243352] px-2.5 py-1 text-[11px] text-slate-300 hover:border-[#38bdf8] hover:text-[#38bdf8] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[#243352] disabled:hover:text-slate-300"
                   >
                     کپی
                   </button>

@@ -1,10 +1,5 @@
 /**
- * POST /v1/messages — اندپوینت سازگار Anthropic
- * • احراز هویت: x-api-key: <key> (+ هدر anthropic-version اختیاری است)
- * • طبق قوانین Anthropic فیلدهای model و max_tokens اجباری‌اند
- * • استریم: message_start → content_block_start/delta/stop → message_delta → message_stop
- *   (تفکر مدل به‌صورت بلوک thinking با thinking_delta منتشر می‌شود)
- * • غیراستریم: آبجکت message با بلوک‌های text/thinking
+ * POST /v1/messages — اندپوینت سازگار Anthropic با پشتیبانی کامل از Tool Calling (مخصوص Claude Code)
  */
 import { randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,7 +7,16 @@ import { openUpstream, UPSTREAM_TIMEOUT_MS } from '@/lib/upstream';
 import { createSseParser } from '@/lib/sse';
 import { resolveModelId } from '@/lib/models';
 import { bearerFrom, getApiKeys, keyIsValid } from '@/lib/apikeys';
-import { estTokens, flattenContent, readAll, SSE_HEADERS, V1_CORS } from '@/lib/v1';
+import {
+  buildToolSystemPrompt,
+  buildUpstreamMessages,
+  createStreamingToolFilter,
+  estTokens,
+  extractToolCalls,
+  readAll,
+  SSE_HEADERS,
+  V1_CORS,
+} from '@/lib/v1';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,7 +42,6 @@ export async function POST(req: NextRequest) {
     return jsonError(400, 'invalid_request_error', 'بدنهٔ JSON نامعتبر است.');
   }
 
-  /* طبق قوانین Anthropic: model و max_tokens اجباری‌اند */
   if (!parsed.model || typeof parsed.model !== 'string') {
     return jsonError(400, 'invalid_request_error', 'model: Field required');
   }
@@ -46,8 +49,6 @@ export async function POST(req: NextRequest) {
     return jsonError(400, 'invalid_request_error', 'max_tokens: Field required');
   }
 
-  /* system (رشته یا بلوک) + messages → فرمت آپستریم */
-  const upstreamMsgs: { role: string; content: string }[] = [];
   let sysText = '';
   if (typeof parsed.system === 'string') sysText = parsed.system;
   else if (Array.isArray(parsed.system)) {
@@ -55,24 +56,27 @@ export async function POST(req: NextRequest) {
       .map((b) => (b && typeof b.text === 'string' ? b.text : ''))
       .join('\n');
   }
-  if (sysText.trim()) upstreamMsgs.push({ role: 'system', content: sysText.trim() });
 
-  const msgsIn = Array.isArray(parsed.messages) ? (parsed.messages as Record<string, unknown>[]) : [];
-  for (const m of msgsIn) {
-    if (!m || typeof m !== 'object') continue;
-    const content = flattenContent(m.content);
-    if (content) upstreamMsgs.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content });
-  }
+  const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0 && parsed.tool_choice !== 'none';
+  const toolsPrompt = hasTools ? buildToolSystemPrompt(parsed.tools, parsed.tool_choice) : '';
+  const upstreamMsgs = buildUpstreamMessages(parsed.messages, sysText, toolsPrompt);
+
   if (!upstreamMsgs.length) {
     return jsonError(400, 'invalid_request_error', 'messages: at least one message is required');
   }
 
   const model = resolveModelId(parsed.model);
   const wantStream = parsed.stream === true;
+  const thinkingEnabled =
+    parsed.thinking === true ||
+    (parsed.thinking !== null &&
+      typeof parsed.thinking === 'object' &&
+      (parsed.thinking as Record<string, unknown>).type === 'enabled');
+
   const payload = JSON.stringify({
     messages: upstreamMsgs,
     modelId: model,
-    thinking: parsed.thinking === true, // اکستنشن غیراستاندارد (اختیاری)
+    thinking: thinkingEnabled,
     deepSearch: false,
     stream: wantStream,
   });
@@ -80,7 +84,6 @@ export async function POST(req: NextRequest) {
   const msgId = 'msg_' + randomBytes(10).toString('hex');
   const estIn = estTokens(upstreamMsgs.reduce((n, m) => n + m.content.length, 0));
 
-  /* اتصال به آپستریم */
   let up;
   try {
     up = await openUpstream(payload, UPSTREAM_TIMEOUT_MS);
@@ -114,8 +117,27 @@ export async function POST(req: NextRequest) {
 
     const content: Array<Record<string, unknown>> = [];
     if (acc.reasoning) content.push({ type: 'thinking', thinking: acc.reasoning });
-    content.push({ type: 'text', text: acc.text || (acc.error ? '⚠️ ' + acc.error : '') });
-    if (!acc.text && !acc.reasoning && !acc.error) content.push({ type: 'text', text: '⚠️ پاسخ خالی از سرور دریافت شد.' });
+
+    const { cleanText, toolCalls } = hasTools
+      ? extractToolCalls(acc.text, 'toolu_')
+      : { cleanText: acc.text, toolCalls: [] };
+
+    if (cleanText || acc.error) {
+      content.push({ type: 'text', text: cleanText || '⚠️ ' + acc.error });
+    }
+    for (const tc of toolCalls) {
+      content.push({
+        type: 'tool_use',
+        id: tc.id,
+        name: tc.name,
+        input: tc.input,
+      });
+    }
+    if (!content.length) {
+      content.push({ type: 'text', text: '⚠️ پاسخ خالی از سرور دریافت شد.' });
+    }
+
+    const stopReason = toolCalls.length > 0 ? 'tool_use' : 'end_turn';
 
     return NextResponse.json(
       {
@@ -124,7 +146,7 @@ export async function POST(req: NextRequest) {
         role: 'assistant',
         model,
         content,
-        stop_reason: 'end_turn',
+        stop_reason: stopReason,
         stop_sequence: null,
         usage: { input_tokens: estIn, output_tokens: estTokens(acc.text.length) },
       },
@@ -141,6 +163,9 @@ export async function POST(req: NextRequest) {
       let closed = false;
       let blockIdx = -1;
       let blockType: 'text' | 'thinking' | null = null;
+      let usedTool = false;
+      let gotAnyBlock = false;
+
       const send = (s: string) => {
         if (closed) return;
         try {
@@ -151,6 +176,7 @@ export async function POST(req: NextRequest) {
       };
       const ev = (name: string, obj: Record<string, unknown>) =>
         send('event: ' + name + '\ndata: ' + JSON.stringify(obj) + '\n\n');
+
       const closeBlock = () => {
         if (blockType) {
           ev('content_block_stop', { type: 'content_block_stop', index: blockIdx });
@@ -162,18 +188,59 @@ export async function POST(req: NextRequest) {
         closeBlock();
         blockIdx++;
         blockType = t;
+        gotAnyBlock = true;
         ev('content_block_start', {
           type: 'content_block_start',
           index: blockIdx,
           content_block: t === 'text' ? { type: 'text', text: '' } : { type: 'thinking', thinking: '' },
         });
       };
+
+      const emitText = (txt: string) => {
+        if (!txt) return;
+        openBlock('text');
+        outChars += txt.length;
+        ev('content_block_delta', {
+          type: 'content_block_delta',
+          index: blockIdx,
+          delta: { type: 'text_delta', text: txt },
+        });
+      };
+
+      const emitToolCall = (call: { id: string; name: string; input: Record<string, unknown> }) => {
+        closeBlock();
+        blockIdx++;
+        gotAnyBlock = true;
+        usedTool = true;
+        const jsonArgs = JSON.stringify(call.input || {});
+        outChars += jsonArgs.length;
+        ev('content_block_start', {
+          type: 'content_block_start',
+          index: blockIdx,
+          content_block: { type: 'tool_use', id: call.id, name: call.name, input: {} },
+        });
+        ev('content_block_delta', {
+          type: 'content_block_delta',
+          index: blockIdx,
+          delta: { type: 'input_json_delta', partial_json: jsonArgs },
+        });
+        ev('content_block_stop', { type: 'content_block_stop', index: blockIdx });
+      };
+
+      const toolFilter = createStreamingToolFilter({
+        idPrefix: 'toolu_',
+        onText: emitText,
+        onToolCall: emitToolCall,
+      });
+
       const endStream = () => {
         if (closed) return;
+        if (hasTools) toolFilter.flush();
+        if (!gotAnyBlock) emitText('⚠️ پاسخ خالی از سرور دریافت شد.');
         closeBlock();
         ev('message_delta', {
           type: 'message_delta',
-          delta: { stop_reason: 'end_turn', stop_sequence: null },
+          delta: { stop_reason: usedTool ? 'tool_use' : 'end_turn', stop_sequence: null },
           usage: { output_tokens: estTokens(outChars) },
         });
         ev('message_stop', { type: 'message_stop' });
@@ -203,12 +270,7 @@ export async function POST(req: NextRequest) {
       const parser = createSseParser({
         onEvent: (event) => {
           if (event.error) {
-            openBlock('text');
-            ev('content_block_delta', {
-              type: 'content_block_delta',
-              index: blockIdx,
-              delta: { type: 'text_delta', text: '\n\n⚠️ ' + event.error },
-            });
+            emitText('\n\n⚠️ ' + event.error);
             return;
           }
           if (event.reasoning) {
@@ -220,13 +282,8 @@ export async function POST(req: NextRequest) {
             });
           }
           if (event.text) {
-            openBlock('text');
-            outChars += event.text.length;
-            ev('content_block_delta', {
-              type: 'content_block_delta',
-              index: blockIdx,
-              delta: { type: 'text_delta', text: event.text },
-            });
+            if (hasTools) toolFilter.push(event.text);
+            else emitText(event.text);
           }
         },
       });
@@ -237,7 +294,6 @@ export async function POST(req: NextRequest) {
         endStream();
       });
       up.res.on('error', () => endStream());
-      /* قطع کلاینت → قطع آپستریم */
       req.signal?.addEventListener('abort', () => {
         closed = true;
         up.req.destroy();

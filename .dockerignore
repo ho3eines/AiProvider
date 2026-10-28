@@ -1,0 +1,62 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  .dockerignore — چیزی که وارد context بیلد Docker نمی‌شود
+#  هدف: بیلد سریع، تصویر کوچک، و مهم‌تر از همه «نرفتن رازها داخل تصویر»
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── VCS و CI ──
+.git
+.gitignore
+.github
+
+# ── وابستگی‌ها و خروجی بیلد (داخل تصویر از نو ساخته می‌شوند) ──
+node_modules
+.next
+out
+build
+coverage
+*.tsbuildinfo
+next-env.d.ts
+
+# ── رازها و فایل‌های محیطی ──
+# کلیدها باید از راه متغیرهای محیطی Railway تزریق شوند، نه از داخل تصویر
+.env
+.env.*
+!.env.example
+api-keys.json
+
+# ── دیتابیس محلی (sqlite) و اسکریپت‌های پلتفرم قبلی ──
+db
+.zscripts
+tests
+mini-services
+
+# ── مستندات و فایل‌های سنگین غیرلازم برای اجرا ──
+download
+upload
+tool-results
+scripts/_probe
+README.md
+HANDOFF.md
+AI-GUIDE.md
+worklog.md
+Caddyfile
+
+# ── لاگ‌ها و فایل‌های موقت ──
+*.log
+dev.log
+server.log
+dev.pid
+.DS_Store
+
+# ── فایل‌های خودِ Docker/استقرار (نیازی به بودن در context ندارند) ──
+Dockerfile
+Dockerfile.*
+.dockerignore
+docker-compose*.yml
+railway.json
+railway.toml
+nixpacks.toml
+
+# ── lockfile جایگزین (بیلد Docker با npm ci و package-lock.json است) ──
+bun.lock
+bun.lockb
