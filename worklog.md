@@ -286,3 +286,19 @@ Work Log:
 Stage Summary:
 - پروژه حالا ۱۰۰٪ با freemodels.pro اکتبر ۲۰۲۶ همگام است: ۹ مدل، پیش‌فرض claude-sonnet-5، alias های قدیمی سالم
 - محدودیت محیطی سندباکس (egress هنگ‌کنگ → 403 Token Harbor) رفع‌شدنی از سمت کد نیست؛ برای کار واقعی: npm run cf:deploy (Cloudflare) یا docker:build + Railway
+
+---
+Task ID: 15
+Agent: main (Z.ai Code)
+Task: درخواست کاربر («حالا پروژه رو رو گیت هاب pull کن») — سینک معکوس: آماده‌سازی push نسخهٔ 0.3.1 سندباکس به GitHub
+
+Work Log:
+- کلون مجدد مخزن (HEAD = 372b9f2، v0.3.0) و diff کامل با سندباکس: تنها تفاوت‌های محتوایی = کاتالوگ ۹ مدلی Task 14 (app.js ۱۶ خط، models.ts، page.tsx، ping) + مستندات بروز + worklog؛ نسخهٔ محلی superset کامل v0.3.0 است (ReAct، cloudflare/، Docker/Railway، EXPOSE_KEYS همهٔ موجود)
+- پاک‌سازی index پیش از push: untrack شدن api-keys.json (کلید واقعی — طبق قانون .gitignore) و tool-results/ و upload/ و .zscripts/ (ابزارهای سندباکس)؛ فایل‌ها روی دیسک حفظ شدند؛ قوانین جدید ignore اضافه شد (commit 2491bc6)
+- ادغام تاریخچه بدون تغییر محتوا: git merge -s ours origin/main (commit b848fcf) — تاریخچهٔ GitHub (b3a089d deploy، c05e4e4 docs، 372b9f2 ReAct) پدرِ تاریخچهٔ سندباکس شد؛ push حالا fast-forward است، نه force
+- راستی‌آزمایی: node --check ✓ · models.ts = ۹ مدل ✓ · app.js = ۱۸ ردیف مدل (۹ سرور + ۹ کلاینت) ✓ · درخت کاری تمیز ✓ · ۳ کامیت جلوتر از origin/main
+- تلاش برای push: BLOCKED — سندباکس توکن GitHub ندارد (fatal: could not read Username)؛ دو راه برای کاربر: (۱) دادن PAT fine-grained فقط برای همین ریپو با دسترسی Contents: Read/Write، (۲) اجرای دستورات push روی سیستم شخصی
+
+Stage Summary:
+- مخزن محلی کاملاً push-ready است: merge تمیز + پاک‌سازی رازها؛ به‌محض دریافت توکن (یا اجرای محلی توسط کاربر) push انجام می‌شود
+- نکتهٔ امنیتی: کلیدهای واقعی هم‌اکنون در AI-GUIDE.md و download/README.md مخزن عمومی GitHub هستند (تصمیم قبلی کاربر) — چرخش کلیدها در freemodels توصیه می‌شود اگر ریپو عمومی است
